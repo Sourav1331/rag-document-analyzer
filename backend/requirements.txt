@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-dotenv
+langchain
+langchain-community
+langchain-groq
+chromadb
+pypdf
+unstructured
+python-docx
+pandas
+openpyxl
+sentence-transformers
+python-multipart
