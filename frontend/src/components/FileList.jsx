@@ -7,10 +7,12 @@ export default function FileList({ files }) {
       {files.map((name, i) => {
         const ext = name.split('.').pop().toLowerCase()
         return (
-          <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-800 rounded-lg text-sm">
+          <div key={i} className="flex items-center gap-2 px-3 py-2 bg-slate-900/70 border border-slate-800/70 rounded-xl text-sm">
             <span>{icons[ext] || '📎'}</span>
-            <span className="truncate text-gray-300">{name}</span>
-            <span className="ml-auto w-2 h-2 rounded-full bg-green-400 shrink-0" title="Ready" />
+            <span className="truncate text-slate-200">{name}</span>
+            <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-semibold text-emerald-200 bg-emerald-500/10 border border-emerald-500/20" title="Ready">
+              Ready
+            </span>
           </div>
         )
       })}

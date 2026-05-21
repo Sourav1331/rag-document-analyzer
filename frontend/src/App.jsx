@@ -49,46 +49,56 @@ export default function App() {
       const { data } = await axios.post('/ask', { session_id: sessionId, question: text })
       setMessages(prev => [...prev, { role: 'bot', text: data.answer }])
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'bot', text: 'Something went wrong. Please try again.' }])
+      let detail = 'Something went wrong. Please try again.'
+      if (axios.isAxiosError(e)) {
+        detail = e.response?.data?.detail || e.message || detail
+      }
+      setMessages(prev => [...prev, { role: 'bot', text: detail }])
     } finally {
       setThinking(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col">
+    <div className="min-h-screen text-gray-100 flex flex-col">
       {/* Header */}
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-sm font-bold">R</div>
-        <h1 className="text-base font-semibold text-white">DocRAG</h1>
-        <span className="text-xs text-gray-500 ml-1">powered by Groq</span>
-        <div className="ml-auto flex items-center gap-2 text-xs text-green-400">
-          <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
-          Live
+      <header className="border-b border-slate-800/80 bg-slate-950/60 backdrop-blur">
+        <div className="px-6 py-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-500 flex items-center justify-center text-sm font-bold shadow-lg shadow-indigo-500/20">
+            R
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-white brand">DocRAG Studio</h1>
+            <span className="text-xs text-slate-400">Document intelligence workspace</span>
+          </div>
+          <div className="ml-auto flex items-center gap-2 text-xs text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+            Live
+          </div>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col lg:flex-row overflow-hidden px-6 pb-6 gap-6">
         {/* Sidebar */}
-        <aside className="w-72 border-r border-gray-800 flex flex-col p-4 gap-4 bg-gray-900">
+        <aside className="w-full lg:w-80 shrink-0 flex flex-col gap-4 bg-slate-900/60 border border-slate-800/70 rounded-2xl p-5 shadow-xl shadow-slate-950/40">
           <div>
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Upload documents</p>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.2em] mb-3">Upload documents</p>
             <UploadZone onUpload={handleUpload} loading={uploading} />
-            {statusMsg && <p className="text-xs text-indigo-400 mt-2">{statusMsg}</p>}
+            {statusMsg && <p className="text-xs text-indigo-300 mt-2">{statusMsg}</p>}
             <FileList files={uploadedFiles} />
           </div>
 
           <div className="mt-auto">
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Suggested questions</p>
-            <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.2em] mb-2">Suggested questions</p>
+            <div className="space-y-2">
               {SUGGESTIONS.map(s => (
                 <button
                   key={s}
                   onClick={() => handleAsk(s)}
                   disabled={!uploadedFiles.length}
-                  className="w-full text-left text-xs text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-800 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="w-full text-left text-xs text-slate-300 hover:text-white px-3 py-2 rounded-lg hover:bg-slate-800/70 transition disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  {s} ↗
+                  {s}
                 </button>
               ))}
             </div>
@@ -96,11 +106,11 @@ export default function App() {
         </aside>
 
         {/* Chat */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 flex flex-col overflow-hidden bg-slate-950/60 border border-slate-800/70 rounded-2xl shadow-xl shadow-slate-950/40">
           <ChatWindow messages={messages} thinking={thinking} />
 
           {/* Input */}
-          <div className="border-t border-gray-800 p-4">
+          <div className="border-t border-slate-800/70 p-4 bg-slate-950/70">
             <div className="flex gap-3 items-end max-w-3xl mx-auto">
               <textarea
                 ref={inputRef}
@@ -110,17 +120,17 @@ export default function App() {
                 placeholder={uploadedFiles.length ? 'Ask a question about your documents…' : 'Upload a document to get started'}
                 disabled={!uploadedFiles.length || thinking}
                 rows={1}
-                className="flex-1 resize-none bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 disabled:opacity-40 transition"
+                className="flex-1 resize-none bg-slate-900/80 border border-slate-800/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-40 transition"
               />
               <button
                 onClick={() => handleAsk()}
                 disabled={!question.trim() || !uploadedFiles.length || thinking}
-                className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition"
+                className="px-4 py-3 bg-gradient-to-r from-indigo-500 to-sky-500 hover:from-indigo-400 hover:to-sky-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-semibold transition shadow-lg shadow-indigo-500/25"
               >
                 Ask
               </button>
             </div>
-            <p className="text-center text-xs text-gray-600 mt-2">Press Enter to send · Shift+Enter for new line</p>
+            <p className="text-center text-xs text-slate-500 mt-2">Press Enter to send · Shift+Enter for new line</p>
           </div>
         </main>
       </div>

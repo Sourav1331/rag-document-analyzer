@@ -84,15 +84,19 @@ def answer_question(session_id: str, question: str) -> str:
     if session_id not in STORES:
         raise ValueError("No documents loaded for this session. Please upload files first.")
 
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY is not set. Please configure it in your environment.")
+
     llm = ChatGroq(
-        model="llama3-70b-8192",
+        model="llama-3.1-8b-instant",
         temperature=0,
-        api_key=os.getenv("GROQ_API_KEY")
+        api_key=api_key
     )
     chain = PROMPT | llm | StrOutputParser()
 
     retriever = STORES[session_id].as_retriever(search_kwargs={"k": 4})
-    docs = retriever.get_relevant_documents(question)
+    docs = retriever.invoke(question) if hasattr(retriever, "invoke") else retriever.get_relevant_documents(question)
     context = "\n\n".join([d.page_content for d in docs])
 
     return chain.invoke({"context": context, "question": question})
