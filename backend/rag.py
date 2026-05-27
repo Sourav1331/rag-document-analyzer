@@ -5,7 +5,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import (
     PyPDFLoader, TextLoader,
-    UnstructuredWordDocumentLoader, UnstructuredExcelLoader,
+    UnstructuredWordDocumentLoader,
 )
 from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
@@ -19,8 +19,11 @@ STORES: dict = {}
 
 PROMPT = PromptTemplate(
     input_variables=["context", "question"],
-    template="""You are a helpful assistant analyzing uploaded documents.
-Use the context below to answer the question accurately.
+    template="""You are DocRAG, a professional document analysis assistant.
+Answer using ONLY the context provided. Be concise, structured, and accurate.
+
+If the answer is not in the context, say:
+"I couldn't find that in the uploaded documents."
 
 Context:
 {context}
@@ -28,10 +31,28 @@ Context:
 Question:
 {question}
 
-Answer clearly and accurately. If the answer isn't in the context, say:
-"I couldn't find that in the uploaded documents."
-"""
+Provide the best possible answer without guessing."""
 )
+
+
+def _format_context(docs: list[Document]) -> tuple[str, list[str]]:
+    sources = []
+    blocks = []
+    for d in docs:
+        raw_source = d.metadata.get("source", "")
+        name = Path(raw_source).name if raw_source else "Unknown source"
+        sources.append(name)
+        blocks.append(f"Source: {name}\n{d.page_content}")
+    unique_sources = sorted({s for s in sources if s})
+    return "\n\n".join(blocks), unique_sources
+
+
+def _tabular_to_text(df: pd.DataFrame) -> str:
+    df = df.fillna("")
+    return "\n\n".join([
+        ", ".join([f"{col}: {row[col]}" for col in df.columns])
+        for _, row in df.iterrows()
+    ])
 
 
 def load_file(file_path: str) -> list[Document]:
@@ -40,13 +61,22 @@ def load_file(file_path: str) -> list[Document]:
         return PyPDFLoader(file_path).load()
     elif ext == ".csv":
         df = pd.read_csv(file_path)
-        text = "\n\n".join([
-            ", ".join([f"{col}: {row[col]}" for col in df.columns])
-            for _, row in df.iterrows()
-        ])
+        text = _tabular_to_text(df)
         return [Document(page_content=text, metadata={"source": file_path})]
     elif ext in [".xlsx", ".xls"]:
-        return UnstructuredExcelLoader(file_path).load()
+        engine = "openpyxl" if ext == ".xlsx" else "xlrd"
+        try:
+            sheets = pd.read_excel(file_path, sheet_name=None, engine=engine)
+        except Exception:
+            sheets = pd.read_excel(file_path, sheet_name=None)
+        docs = []
+        for name, sheet_df in sheets.items():
+            text = _tabular_to_text(sheet_df)
+            docs.append(Document(
+                page_content=f"Sheet: {name}\n{text}",
+                metadata={"source": file_path, "sheet": name}
+            ))
+        return docs
     elif ext in [".docx", ".doc"]:
         return UnstructuredWordDocumentLoader(file_path).load()
     elif ext == ".txt":
@@ -80,7 +110,7 @@ def build_store(session_id: str, file_paths: list[str]) -> str:
     return msg
 
 
-def answer_question(session_id: str, question: str) -> str:
+def answer_question(session_id: str, question: str) -> tuple[str, list[str]]:
     if session_id not in STORES:
         raise ValueError("No documents loaded for this session. Please upload files first.")
 
@@ -97,6 +127,7 @@ def answer_question(session_id: str, question: str) -> str:
 
     retriever = STORES[session_id].as_retriever(search_kwargs={"k": 4})
     docs = retriever.invoke(question) if hasattr(retriever, "invoke") else retriever.get_relevant_documents(question)
-    context = "\n\n".join([d.page_content for d in docs])
+    context, sources = _format_context(docs)
 
-    return chain.invoke({"context": context, "question": question})
+    answer = chain.invoke({"context": context, "question": question})
+    return answer, sources

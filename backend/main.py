@@ -19,7 +19,7 @@ ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173"
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     ).split(",")
     if origin.strip()
 ]
@@ -95,8 +95,8 @@ class QuestionRequest(BaseModel):
 @app.post("/ask")
 async def ask(body: QuestionRequest):
     try:
-        answer = answer_question(body.session_id, body.question)
-        return {"answer": answer}
+        answer, sources = answer_question(body.session_id, body.question)
+        return {"answer": answer, "sources": sources}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GroqError as e:
@@ -108,3 +108,8 @@ async def ask(body: QuestionRequest):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

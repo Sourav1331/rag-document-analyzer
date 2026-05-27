@@ -11,5 +11,6 @@ unstructured
 python-docx
 pandas
 openpyxl
+xlrd
 sentence-transformers
 python-multipart
