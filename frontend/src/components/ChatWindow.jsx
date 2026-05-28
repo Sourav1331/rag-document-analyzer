@@ -19,7 +19,7 @@ export default function ChatWindow({ messages, thinking }) {
             </div>
           </div>
         )}
-        {messages.map((m, i) => <MessageBubble key={i} role={m.role} text={m.text} />)}
+        {messages.map((m, i) => <MessageBubble key={i} role={m.role} text={m.text} sources={m.sources} />)}
         {thinking && (
           <div className="flex items-center gap-2 text-slate-400 text-sm">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-sky-500 flex items-center justify-center text-xs font-bold shrink-0">
