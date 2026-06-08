@@ -17,13 +17,17 @@ EMBEDDINGS = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-
 # One vector store per session_id
 STORES: dict = {}
 
+# REPLACE the entire PROMPT block:
 PROMPT = PromptTemplate(
     input_variables=["context", "question"],
     template="""You are DocRAG, a professional document analysis assistant.
-Answer using ONLY the context provided. Be concise, structured, and accurate.
+Answer using ONLY the context provided. Be structured and accurate.
 
-If the answer is not in the context, say:
-"I couldn't find that in the uploaded documents."
+Rules:
+- Include ALL relevant items (e.g. if there are 3 projects, list all 3).
+- ALWAYS include URLs, links, and live demo links exactly as they appear in the context — do not skip or shorten them.
+- Do not summarize away specific details like links, dates, or names.
+- If the answer is not in the context, say: "I couldn't find that in the uploaded documents."
 
 Context:
 {context}
@@ -31,9 +35,8 @@ Context:
 Question:
 {question}
 
-Provide the best possible answer without guessing."""
+Answer:"""
 )
-
 
 def _format_context(docs: list[Document]) -> tuple[str, list[str]]:
     sources = []
@@ -98,7 +101,7 @@ def build_store(session_id: str, file_paths: list[str]) -> str:
     if not all_docs:
         raise ValueError("No documents could be loaded.")
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
     chunks = splitter.split_documents(all_docs)
 
     STORES[session_id] = Chroma.from_documents(chunks, embedding=EMBEDDINGS)
@@ -125,7 +128,7 @@ def answer_question(session_id: str, question: str) -> tuple[str, list[str]]:
     )
     chain = PROMPT | llm | StrOutputParser()
 
-    retriever = STORES[session_id].as_retriever(search_kwargs={"k": 4})
+    retriever = STORES[session_id].as_retriever(search_kwargs={"k": 10})
     docs = retriever.invoke(question) if hasattr(retriever, "invoke") else retriever.get_relevant_documents(question)
     context, sources = _format_context(docs)
 
