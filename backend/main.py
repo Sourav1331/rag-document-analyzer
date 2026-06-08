@@ -32,15 +32,16 @@ app.add_middleware(
 )
 
 
-def _safe_filename(filename: str) -> str:
+def _safe_filename(filename: str, allowed_exts: set = None) -> str:
     if not filename:
         raise HTTPException(status_code=400, detail="Invalid filename.")
     safe_name = os.path.basename(filename)
     ext = Path(safe_name).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    check_exts = allowed_exts or ALLOWED_EXTENSIONS
+    if ext not in check_exts:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type: {ext}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}."
+            detail=f"Wrong file type: '{ext}'. This endpoint only accepts: {', '.join(sorted(check_exts))}."
         )
     return safe_name
 
@@ -61,30 +62,73 @@ def _copy_with_limit(src, dest: str) -> None:
             out.write(chunk)
 
 
-@app.post("/upload")
-async def upload(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
+async def _handle_upload(files, session_id, allowed_exts=None):
     sid = session_id or str(uuid.uuid4())
     tmp_dir = tempfile.mkdtemp()
     saved = []
-
     try:
         for f in files:
-            safe_name = _safe_filename(f.filename)
+            safe_name = _safe_filename(f.filename, allowed_exts)
             dest = os.path.join(tmp_dir, f"{uuid.uuid4()}-{safe_name}")
             _copy_with_limit(f.file, dest)
             saved.append(dest)
-
         try:
             msg = build_store(sid, saved)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         return {"session_id": sid, "message": msg, "files": [f.filename for f in files]}
-
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# --- Generic upload (all types) ---
+@app.post("/upload")
+async def upload(
+    files: list[UploadFile] = File(...),
+    session_id: Optional[str] = Form(default=None)
+):
+    return await _handle_upload(files, session_id)
+
+
+# --- Type-specific upload endpoints ---
+@app.post("/upload/csv")
+async def upload_csv(
+    files: list[UploadFile] = File(...),
+    session_id: Optional[str] = Form(default=None)
+):
+    return await _handle_upload(files, session_id, allowed_exts={".csv"})
+
+
+@app.post("/upload/pdf")
+async def upload_pdf(
+    files: list[UploadFile] = File(...),
+    session_id: Optional[str] = Form(default=None)
+):
+    return await _handle_upload(files, session_id, allowed_exts={".pdf"})
+
+
+@app.post("/upload/excel")
+async def upload_excel(
+    files: list[UploadFile] = File(...),
+    session_id: Optional[str] = Form(default=None)
+):
+    return await _handle_upload(files, session_id, allowed_exts={".xlsx", ".xls"})
+
+
+@app.post("/upload/txt")
+async def upload_txt(
+    files: list[UploadFile] = File(...),
+    session_id: Optional[str] = Form(default=None)
+):
+    return await _handle_upload(files, session_id, allowed_exts={".txt"})
+
+
+@app.post("/upload/docx")
+async def upload_docx(
+    files: list[UploadFile] = File(...),
+    session_id: Optional[str] = Form(default=None)
+):
+    return await _handle_upload(files, session_id, allowed_exts={".docx", ".doc"})
 
 
 class QuestionRequest(BaseModel):
