@@ -10,8 +10,7 @@ langchain-text-splitters
 langchain-groq
 
 chromadb
-sentence-transformers
-torch
+fastembed
 
 pypdf
 unstructured
