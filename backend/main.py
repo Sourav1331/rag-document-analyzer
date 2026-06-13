@@ -1,19 +1,18 @@
-import uuid, os, shutil, tempfile
+import uuid, os, shutil, tempfile, asyncio, json
 from pathlib import Path
 from typing import Optional
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse as FastAPIStreamingResponse
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from groq import GroqError
+
 from rag import build_store, answer_question, STORES, _format_context, PROMPT_WITH_HISTORY
-from fastapi.responses import StreamingResponse as FastAPIStreamingResponse
-import json
-from pydantic import BaseModel, Field
 
 load_dotenv()
-
-app = FastAPI()
 
 ALLOWED_EXTENSIONS = {".pdf", ".csv", ".docx", ".doc", ".txt", ".xlsx", ".xls"}
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "20"))
@@ -26,6 +25,27 @@ ALLOWED_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+
+
+async def warmup():
+    """Load the embedding model in the background after the server has started."""
+    try:
+        loop = asyncio.get_event_loop()
+        from rag import get_embeddings
+        await loop.run_in_executor(None, get_embeddings)
+        print("Embeddings model loaded successfully.")
+    except Exception as e:
+        print(f"Warmup failed (non-fatal): {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Server binds to port immediately, warmup runs in background
+    asyncio.create_task(warmup())
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,7 +104,6 @@ async def _handle_upload(files, session_id, allowed_exts=None):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-# --- Generic upload (all types) ---
 @app.post("/upload")
 async def upload(
     files: list[UploadFile] = File(...),
@@ -93,7 +112,6 @@ async def upload(
     return await _handle_upload(files, session_id)
 
 
-# --- Type-specific upload endpoints ---
 @app.post("/upload/csv")
 async def upload_csv(
     files: list[UploadFile] = File(...),
@@ -139,6 +157,7 @@ class QuestionRequest(BaseModel):
     question: str
     history: list[dict] = Field(default_factory=list)
 
+
 @app.post("/ask")
 async def ask(body: QuestionRequest):
     try:
@@ -151,32 +170,23 @@ async def ask(body: QuestionRequest):
         code = status if isinstance(status, int) and 400 <= status <= 599 else 502
         raise HTTPException(status_code=code, detail=str(e))
 
+
 @app.post("/ask-stream")
 async def ask_stream(body: QuestionRequest):
     if body.session_id not in STORES:
-        raise HTTPException(
-            status_code=400,
-            detail="No documents loaded for this session."
-        )
+        raise HTTPException(status_code=400, detail="No documents loaded for this session.")
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="GROQ_API_KEY is not set."
-        )
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not set.")
 
     async def generate():
         try:
             from langchain_groq import ChatGroq
             from langchain_core.output_parsers import StrOutputParser
 
-            retriever = STORES[body.session_id].as_retriever(
-                search_kwargs={"k": 10}
-            )
-
+            retriever = STORES[body.session_id].as_retriever(search_kwargs={"k": 10})
             docs = retriever.invoke(body.question)
-
             context, sources = _format_context(docs)
 
             llm = ChatGroq(
@@ -186,52 +196,28 @@ async def ask_stream(body: QuestionRequest):
                 streaming=True,
             )
 
-            chain = (
-                PROMPT_WITH_HISTORY
-                | llm
-                | StrOutputParser()
-            )
+            chain = PROMPT_WITH_HISTORY | llm | StrOutputParser()
 
-            # Send sources first
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
-            # Build history string
             history_text = ""
-
             if body.history:
                 for msg in body.history[-6:]:
-                    role = (
-                        "User"
-                        if msg.get("role") == "user"
-                        else "Assistant"
-                    )
-
-                    content = (
-                        msg.get("content")
-                        or msg.get("text")
-                        or ""
-                    )
-
+                    role = "User" if msg.get("role") == "user" else "Assistant"
+                    content = msg.get("content") or msg.get("text") or ""
                     history_text += f"{role}: {content}\n"
 
-            # Stream answer
-            async for chunk in chain.astream(
-                {
-                    "context": context,
-                    "history": history_text,
-                    "question": body.question,
-                }
-            ):
-                yield (
-                    f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
-                )
+            async for chunk in chain.astream({
+                "context": context,
+                "history": history_text,
+                "question": body.question,
+            }):
+                yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
-            yield (
-                f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
-            )
+            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
 
     return FastAPIStreamingResponse(
         generate(),
@@ -242,6 +228,7 @@ async def ask_stream(body: QuestionRequest):
         },
     )
 
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -249,4 +236,5 @@ def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
