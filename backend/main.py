@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from groq import GroqError
 
 from rag import build_store, answer_question, STORES, _format_context, PROMPT_WITH_HISTORY
+import os
+os.environ["ONNXRUNTIME_DISABLE_DEVICE_DISCOVERY"] = "1" 
 
 load_dotenv()
 
@@ -229,8 +231,8 @@ async def ask_stream(body: QuestionRequest):
     )
 
 
-@app.get("/health")
-def health():
+@app.get("/")
+def root():
     return {"status": "ok"}
 
 
