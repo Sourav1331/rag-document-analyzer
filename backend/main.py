@@ -231,9 +231,9 @@ async def ask_stream(body: QuestionRequest):
     )
 
 
-@app.get("/")
-def root():
-    return {"status": "ok", "message": "DocRAG API is running"}
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
