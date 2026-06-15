@@ -193,11 +193,11 @@ def build_store(session_id: str, file_paths: list[str], file_id: str = None) -> 
     if file_id:
         STORE_FILES.setdefault(session_id, {})[file_id] = ids
 
-    # names = [Path(fp).name for fp in file_paths]
-    # msg = f"Loaded {len(chunks)} chunks from {len(names)} file(s)."
-    # if skipped:
-    #     msg += f" Skipped: {', '.join(skipped)}"
-    # return msg
+    names = [Path(fp).name for fp in file_paths]
+    msg = f"Loaded {len(chunks)} chunks from {len(names)} file(s)."
+    if skipped:
+        msg += f" Skipped: {', '.join(skipped)}"
+    return msg
 
 
 def remove_file(session_id: str, file_id: str) -> bool:

@@ -91,24 +91,29 @@ async def _handle_upload(files, session_id, allowed_exts=None, namespace="defaul
     sid = session_id or str(uuid.uuid4())
     store_key = f"{sid}:{namespace}"
     tmp_dir = tempfile.mkdtemp()
-    saved = []
-    file_id = str(uuid.uuid4())
+    saved_files = []
     try:
         for f in files:
             safe_name = _safe_filename(f.filename, allowed_exts)
             dest = os.path.join(tmp_dir, f"{uuid.uuid4()}-{safe_name}")
             _copy_with_limit(f.file, dest)
-            saved.append(dest)
-        try:
-            msg = build_store(store_key, saved, file_id=file_id)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            file_id = str(uuid.uuid4())
+            try:
+                msg = build_store(store_key, [dest], file_id=file_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            saved_files.append(
+                {
+                    "name": f.filename,
+                    "file_id": file_id,
+                    "message": msg,
+                }
+            )
         return {
             "session_id": sid,
             "namespace": namespace,
-            "file_id": file_id,
-            "message": msg,
-            "files": [f.filename for f in files],
+            "message": f"Loaded {len(saved_files)} file(s).",
+            "files": saved_files,
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -216,7 +221,9 @@ async def ask_stream(body: QuestionRequest):
 
             retriever = STORES[store_key].as_retriever(search_kwargs={"k": 10})
             docs = retriever.invoke(body.question)
-            context, _ = _format_context(docs)
+            context, sources = _format_context(docs)
+
+            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
             llm = ChatGroq(
                 model="llama-3.1-8b-instant",
