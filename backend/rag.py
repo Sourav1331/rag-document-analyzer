@@ -1,4 +1,5 @@
 import os
+import uuid
 import pandas as pd
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from langchain_core.output_parsers import StrOutputParser
 # Lazy-loaded — not imported at startup
 EMBEDDINGS = None
 STORES: dict = {}
+STORE_FILES: dict = {}  # store_key -> { file_id: [chroma_ids] }
 
 PROMPT = PromptTemplate(
     input_variables=["context", "question"],
@@ -29,7 +31,7 @@ Rules:
 - Include ALL relevant items.
 - ALWAYS include URLs exactly as they appear.
 - Do not summarize away names, dates, links, or figures.
-- Do NOT use markdown.
+- Do NOT use markdown but make the title bold and increase the size of the title if needed.
 - Use plain text only.
 - If the answer is not in the context, say:
 "I couldn't find that in the uploaded documents."
@@ -141,13 +143,18 @@ def load_file(file_path: str) -> list[Document]:
     raise ValueError(f"Unsupported file type: {ext}")
 
 
-def build_store(session_id: str, file_paths: list[str]) -> str:
+def build_store(session_id: str, file_paths: list[str], file_id: str = None) -> str:
     all_docs = []
     skipped = []
 
     for fp in file_paths:
         try:
-            all_docs.extend(load_file(fp))
+            docs = load_file(fp)
+            for d in docs:
+                d.metadata["source"] = fp
+                if file_id:
+                    d.metadata["file_id"] = file_id
+            all_docs.extend(docs)
         except Exception:
             skipped.append(Path(fp).name)
 
@@ -161,16 +168,37 @@ def build_store(session_id: str, file_paths: list[str]) -> str:
     chunks = splitter.split_documents(all_docs)
 
     # get_embeddings() triggers lazy load here, not at startup
-    STORES[session_id] = Chroma.from_documents(
-        chunks,
-        embedding=get_embeddings(),
-    )
+    if session_id not in STORES:
+        STORES[session_id] = Chroma.from_documents(
+            chunks,
+            embedding=get_embeddings(),
+        )
+        ids = STORES[session_id].get()["ids"]
+    else:
+        ids = [str(uuid.uuid4()) for _ in chunks]
+        STORES[session_id].add_documents(chunks, ids=ids)
+
+    if file_id:
+        STORE_FILES.setdefault(session_id, {})[file_id] = ids
 
     names = [Path(fp).name for fp in file_paths]
     msg = f"Loaded {len(chunks)} chunks from {len(names)} file(s)."
     if skipped:
         msg += f" Skipped: {', '.join(skipped)}"
     return msg
+
+
+def remove_file(session_id: str, file_id: str) -> bool:
+    if session_id not in STORES or session_id not in STORE_FILES:
+        return False
+    ids = STORE_FILES[session_id].pop(file_id, None)
+    if not ids:
+        return False
+    STORES[session_id].delete(ids=ids)
+    if not STORE_FILES[session_id]:
+        del STORES[session_id]
+        del STORE_FILES[session_id]
+    return True
 
 
 def answer_question(
