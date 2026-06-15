@@ -31,10 +31,16 @@ Rules:
 - Include ALL relevant items.
 - ALWAYS include URLs exactly as they appear.
 - Do not summarize away names, dates, links, or figures.
-- Do NOT use markdown but make the title bold and increase the size of the title if needed.
+- Never invent images, figures, URLs, tables, or content not present in the context.
+- Never output placeholder values such as "404 Not Found".
+- Do NOT use markdown.
 - Use plain text only.
-- If the answer is not in the context, say:
+
+If the answer is not present in the context, say exactly:
 "I couldn't find that in the uploaded documents."
+
+If the user asks about images, figures, diagrams, charts, screenshots, logos, or pictures and none are present in the context, say exactly:
+"No images found in the uploaded document."
 
 Context:
 {context}
@@ -57,11 +63,17 @@ Rules:
 - Include ALL relevant items.
 - ALWAYS include URLs exactly as they appear.
 - Do not summarize away names, dates, links, or figures.
+- Never invent images, figures, URLs, tables, or content not present in the context.
+- Never output placeholder values such as "404 Not Found".
 - Do NOT use markdown.
 - Use plain text only.
 - Use conversation history to understand follow-up questions.
-- If the answer is not in the context, say:
+
+If the answer is not present in the context, say exactly:
 "I couldn't find that in the uploaded documents."
+
+If the user asks about images, figures, diagrams, charts, screenshots, logos, or pictures and none are present in the context, say exactly:
+"No images found in the uploaded document."
 
 Previous conversation:
 {history}
@@ -181,11 +193,11 @@ def build_store(session_id: str, file_paths: list[str], file_id: str = None) -> 
     if file_id:
         STORE_FILES.setdefault(session_id, {})[file_id] = ids
 
-    names = [Path(fp).name for fp in file_paths]
-    msg = f"Loaded {len(chunks)} chunks from {len(names)} file(s)."
-    if skipped:
-        msg += f" Skipped: {', '.join(skipped)}"
-    return msg
+    # names = [Path(fp).name for fp in file_paths]
+    # msg = f"Loaded {len(chunks)} chunks from {len(names)} file(s)."
+    # if skipped:
+    #     msg += f" Skipped: {', '.join(skipped)}"
+    # return msg
 
 
 def remove_file(session_id: str, file_id: str) -> bool:
@@ -226,6 +238,32 @@ def answer_question(
     retriever = STORES[session_id].as_retriever(search_kwargs={"k": 10})
     docs = retriever.invoke(question)
     context, sources = _format_context(docs)
+    image_keywords = [
+        "image",
+        "images",
+        "picture",
+        "pictures",
+        "photo",
+        "photos",
+        "figure",
+        "figures",
+        "diagram",
+        "diagrams",
+        "chart",
+        "charts",
+        "logo",
+        "logos",
+    ]
+
+    if any(word in question.lower() for word in image_keywords):
+        if (
+            "image" not in context.lower()
+            and "figure" not in context.lower()
+            and "diagram" not in context.lower()
+            and "chart" not in context.lower()
+            and "logo" not in context.lower()
+        ):
+            return "No images found in the uploaded document.", []
 
     history_text = ""
     if history:
