@@ -216,7 +216,7 @@ async def ask_stream(body: QuestionRequest):
 
             retriever = STORES[store_key].as_retriever(search_kwargs={"k": 10})
             docs = retriever.invoke(body.question)
-            context, sources = _format_context(docs)
+            context, _ = _format_context(docs)
 
             llm = ChatGroq(
                 model="llama-3.1-8b-instant",
@@ -226,8 +226,6 @@ async def ask_stream(body: QuestionRequest):
             )
 
             chain = PROMPT_WITH_HISTORY | llm | StrOutputParser()
-
-            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
             history_text = ""
             if body.history:
