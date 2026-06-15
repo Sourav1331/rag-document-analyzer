@@ -42,7 +42,17 @@ export function useDocAnalysis(type = 'all') {
     form.append('session_id', sessionId)
     try {
       const { data } = await axios.post(`${API_BASE_URL}${endpoint}`, form)
-      setUploadedFiles(prev => [...prev, ...data.files])
+      setUploadedFiles(prev => [
+        ...prev,
+        ...(data.files || []).map(file =>
+          typeof file === 'string'
+            ? { id: null, name: file }
+            : {
+                id: file.file_id || file.id || null,
+                name: file.name || file.filename || '',
+              }
+        ).filter(file => file.name),
+      ])
       setStatusMsg(data.message)
       setBackendStatus('online')
     } catch (e) {
@@ -133,11 +143,32 @@ export function useDocAnalysis(type = 'all') {
     }
   }
 
+  const removeUploadedFile = async (fileId) => {
+    if (!fileId) return
+
+    try {
+      await axios.post(`${API_BASE_URL}/remove-file`, {
+        session_id: sessionId,
+        namespace,
+        file_id: fileId,
+      })
+
+      setUploadedFiles(prev => prev.filter(file => file.id !== fileId))
+      setStatusMsg('File removed.')
+      setBackendStatus('online')
+    } catch (e) {
+      const detail = axios.isAxiosError(e)
+        ? e.response?.data?.detail || 'Unable to remove file.'
+        : 'Unable to remove file.'
+      setStatusMsg(detail)
+    }
+  }
+
   const clearChat = () => setMessages([])
 
   return {
     sessionId, uploadedFiles, uploading, messages,
     thinking, statusMsg, backendStatus,
-    handleUpload, handleAsk, clearChat,
+    handleUpload, handleAsk, removeUploadedFile, clearChat,
   }
 }
