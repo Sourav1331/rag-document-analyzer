@@ -9,7 +9,17 @@ const UPLOAD_ENDPOINTS = {
   pdf:   '/upload/pdf',
   excel: '/upload/excel',
   txt:   '/upload/txt',
+  docx:  '/upload/docx',
   all:   '/upload',
+}
+
+const NAMESPACES = {
+  csv:   'csv',
+  pdf:   'pdf',
+  excel: 'excel',
+  txt:   'text',
+  docx:  'docx',
+  all:   'default',
 }
 
 export function useDocAnalysis(type = 'all') {
@@ -22,6 +32,7 @@ export function useDocAnalysis(type = 'all') {
   const [backendStatus, setBackendStatus] = useState('checking')
 
   const endpoint = UPLOAD_ENDPOINTS[type] || '/upload'
+  const namespace = NAMESPACES[type] || 'default'
 
   const handleUpload = async (files) => {
     setUploading(true)
@@ -70,7 +81,7 @@ export function useDocAnalysis(type = 'all') {
       const response = await fetch(`${API_BASE_URL}/ask-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, question: text, history }),
+        body: JSON.stringify({ session_id: sessionId, namespace, question: text, history }),
       })
 
       if (!response.ok) {
