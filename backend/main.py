@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from groq import GroqError
 
-from rag import build_store, answer_question, STORES, _format_context, PROMPT_WITH_HISTORY
+from rag import build_store, answer_question, STORES, _format_context, PROMPT_WITH_HISTORY, remove_file
 import os
 os.environ["ONNXRUNTIME_DISABLE_DEVICE_DISCOVERY"] = "1" 
 
@@ -87,10 +87,12 @@ def _copy_with_limit(src, dest: str) -> None:
             out.write(chunk)
 
 
-async def _handle_upload(files, session_id, allowed_exts=None):
+async def _handle_upload(files, session_id, allowed_exts=None, namespace="default"):
     sid = session_id or str(uuid.uuid4())
+    store_key = f"{sid}:{namespace}"
     tmp_dir = tempfile.mkdtemp()
     saved = []
+    file_id = str(uuid.uuid4())
     try:
         for f in files:
             safe_name = _safe_filename(f.filename, allowed_exts)
@@ -98,10 +100,16 @@ async def _handle_upload(files, session_id, allowed_exts=None):
             _copy_with_limit(f.file, dest)
             saved.append(dest)
         try:
-            msg = build_store(sid, saved)
+            msg = build_store(store_key, saved, file_id=file_id)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        return {"session_id": sid, "message": msg, "files": [f.filename for f in files]}
+        return {
+            "session_id": sid,
+            "namespace": namespace,
+            "file_id": file_id,
+            "message": msg,
+            "files": [f.filename for f in files],
+        }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -111,7 +119,7 @@ async def upload(
     files: list[UploadFile] = File(...),
     session_id: Optional[str] = Form(default=None)
 ):
-    return await _handle_upload(files, session_id)
+    return await _handle_upload(files, session_id, namespace="default")
 
 
 @app.post("/upload/csv")
@@ -119,7 +127,7 @@ async def upload_csv(
     files: list[UploadFile] = File(...),
     session_id: Optional[str] = Form(default=None)
 ):
-    return await _handle_upload(files, session_id, allowed_exts={".csv"})
+    return await _handle_upload(files, session_id, allowed_exts={".csv"}, namespace="csv")
 
 
 @app.post("/upload/pdf")
@@ -127,7 +135,7 @@ async def upload_pdf(
     files: list[UploadFile] = File(...),
     session_id: Optional[str] = Form(default=None)
 ):
-    return await _handle_upload(files, session_id, allowed_exts={".pdf"})
+    return await _handle_upload(files, session_id, allowed_exts={".pdf"}, namespace="pdf")
 
 
 @app.post("/upload/excel")
@@ -135,7 +143,7 @@ async def upload_excel(
     files: list[UploadFile] = File(...),
     session_id: Optional[str] = Form(default=None)
 ):
-    return await _handle_upload(files, session_id, allowed_exts={".xlsx", ".xls"})
+    return await _handle_upload(files, session_id, allowed_exts={".xlsx", ".xls"}, namespace="excel")
 
 
 @app.post("/upload/txt")
@@ -143,7 +151,7 @@ async def upload_txt(
     files: list[UploadFile] = File(...),
     session_id: Optional[str] = Form(default=None)
 ):
-    return await _handle_upload(files, session_id, allowed_exts={".txt"})
+    return await _handle_upload(files, session_id, allowed_exts={".txt"}, namespace="text")
 
 
 @app.post("/upload/docx")
@@ -151,20 +159,37 @@ async def upload_docx(
     files: list[UploadFile] = File(...),
     session_id: Optional[str] = Form(default=None)
 ):
-    return await _handle_upload(files, session_id, allowed_exts={".docx", ".doc"})
+    return await _handle_upload(files, session_id, allowed_exts={".docx", ".doc"}, namespace="docx")
 
 
 class QuestionRequest(BaseModel):
     session_id: str
+    namespace: str = "default"
     question: str
     history: list[dict] = Field(default_factory=list)
 
 
+class RemoveFileRequest(BaseModel):
+    session_id: str
+    namespace: str = "default"
+    file_id: str
+
+
+@app.post("/remove-file")
+async def remove_file_endpoint(body: RemoveFileRequest):
+    store_key = f"{body.session_id}:{body.namespace}"
+    ok = remove_file(store_key, body.file_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="File not found in session.")
+    return {"message": "File removed."}
+
+
 @app.post("/ask")
 async def ask(body: QuestionRequest):
+    store_key = f"{body.session_id}:{body.namespace}"
     try:
-        answer, sources = answer_question(body.session_id, body.question, body.history)
-        return {"answer": answer, "sources": sources}
+        answer, sources = answer_question(store_key, body.question, body.history)
+        return {"answer": answer}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GroqError as e:
@@ -175,7 +200,9 @@ async def ask(body: QuestionRequest):
 
 @app.post("/ask-stream")
 async def ask_stream(body: QuestionRequest):
-    if body.session_id not in STORES:
+    store_key = f"{body.session_id}:{body.namespace}"
+
+    if store_key not in STORES:
         raise HTTPException(status_code=400, detail="No documents loaded for this session.")
 
     api_key = os.getenv("GROQ_API_KEY")
@@ -187,7 +214,7 @@ async def ask_stream(body: QuestionRequest):
             from langchain_groq import ChatGroq
             from langchain_core.output_parsers import StrOutputParser
 
-            retriever = STORES[body.session_id].as_retriever(search_kwargs={"k": 10})
+            retriever = STORES[store_key].as_retriever(search_kwargs={"k": 10})
             docs = retriever.invoke(body.question)
             context, sources = _format_context(docs)
 
