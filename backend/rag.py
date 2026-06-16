@@ -1,5 +1,6 @@
 import os
 import uuid
+import re
 import pandas as pd
 from pathlib import Path
 
@@ -19,6 +20,12 @@ from langchain_core.output_parsers import StrOutputParser
 EMBEDDINGS = None
 STORES: dict = {}
 STORE_FILES: dict = {}  # store_key -> { file_id: [chroma_ids] }
+
+
+def _collection_name(store_key: str) -> str:
+    """Create a Chroma collection name that is unique per analyzer session."""
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]+", "_", store_key).strip("_")
+    return f"docrag_{safe_key}"[:63]
 
 PROMPT = PromptTemplate(
     input_variables=["context", "question"],
@@ -184,6 +191,7 @@ def build_store(session_id: str, file_paths: list[str], file_id: str = None) -> 
         STORES[session_id] = Chroma.from_documents(
             chunks,
             embedding=get_embeddings(),
+            collection_name=_collection_name(session_id),
         )
         ids = STORES[session_id].get()["ids"]
     else:
