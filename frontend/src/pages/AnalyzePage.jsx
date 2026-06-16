@@ -13,10 +13,10 @@ const TABS = [
 ]
 
 const COMPONENTS = {
-  pdf:   <PdfAnalyzer />,
-  csv:   <CsvAnalyzer />,
-  excel: <ExcelAnalyzer />,
-  txt:   <TxtAnalyzer />,
+  pdf: PdfAnalyzer,
+  csv: CsvAnalyzer,
+  excel: ExcelAnalyzer,
+  txt: TxtAnalyzer,
 }
 
 export default function AnalyzePage() {
@@ -72,7 +72,18 @@ export default function AnalyzePage() {
 
       {/* Active analyzer */}
       <div className="flex-1 min-h-0 overflow-hidden px-6 py-6">
-        {COMPONENTS[activeTab]}
+        {TABS.map(tab => {
+          const Analyzer = COMPONENTS[tab.id]
+
+          return (
+            <div
+              key={tab.id}
+              className={activeTab === tab.id ? 'h-full' : 'hidden'}
+            >
+              <Analyzer />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
