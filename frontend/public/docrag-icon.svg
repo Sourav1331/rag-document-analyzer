@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DocRAG logo">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="0.55" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="page" x1="20" y1="13" x2="44" y2="51" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+  <path d="M20 12h18l10 10v30H20V12z" fill="url(#page)"/>
+  <path d="M38 12v11h10" fill="#bfdbfe"/>
+  <path d="M25 31h18M25 38h15M25 45h10" stroke="#1e293b" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="45" cy="45" r="9" fill="#0f172a"/>
+  <path d="M41.5 45.5l2.5 2.5 5-6" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

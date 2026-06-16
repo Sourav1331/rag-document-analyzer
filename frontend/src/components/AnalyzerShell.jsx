@@ -52,8 +52,10 @@ export default function AnalyzerShell({
     thinking,
     statusMsg,
     backendStatus,
+    activeFileId,
     handleUpload,
     handleAsk,
+    removeUploadedFile,
     clearChat
   } = useDocAnalysis(type)
 
@@ -124,7 +126,11 @@ export default function AnalyzerShell({
             </p>
           )}
 
-          <FileList files={uploadedFiles} />
+          <FileList
+            files={uploadedFiles}
+            activeFileId={activeFileId}
+            onRemove={removeUploadedFile}
+          />
         </div>
 
         <div className="mt-auto">

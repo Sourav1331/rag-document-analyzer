@@ -25,6 +25,7 @@ const NAMESPACES = {
 export function useDocAnalysis(type = 'all') {
   const [sessionId] = useState(() => uuidv4())
   const [uploadedFiles, setUploadedFiles] = useState([])
+  const [activeFileId, setActiveFileId] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [messages, setMessages] = useState([])
   const [thinking, setThinking] = useState(false)
@@ -42,17 +43,21 @@ export function useDocAnalysis(type = 'all') {
     form.append('session_id', sessionId)
     try {
       const { data } = await axios.post(`${API_BASE_URL}${endpoint}`, form)
+      const newFiles = (data.files || []).map(file =>
+        typeof file === 'string'
+          ? { id: null, name: file }
+          : {
+              id: file.file_id || file.id || null,
+              name: file.name || file.filename || '',
+            }
+      ).filter(file => file.name)
+
       setUploadedFiles(prev => [
+        ...newFiles,
         ...prev,
-        ...(data.files || []).map(file =>
-          typeof file === 'string'
-            ? { id: null, name: file }
-            : {
-                id: file.file_id || file.id || null,
-                name: file.name || file.filename || '',
-              }
-        ).filter(file => file.name),
       ])
+      setActiveFileId(newFiles[0]?.id || null)
+      setMessages([])
       setStatusMsg(data.message)
       setBackendStatus('online')
     } catch (e) {
@@ -91,7 +96,7 @@ export function useDocAnalysis(type = 'all') {
       const response = await fetch(`${API_BASE_URL}/ask-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, namespace, question: text, history }),
+        body: JSON.stringify({ session_id: sessionId, namespace, file_id: activeFileId, question: text, history }),
       })
 
       if (!response.ok) {
@@ -154,6 +159,13 @@ export function useDocAnalysis(type = 'all') {
       })
 
       setUploadedFiles(prev => prev.filter(file => file.id !== fileId))
+      setActiveFileId(prev => {
+        if (prev !== fileId) return prev
+
+        const nextFile = uploadedFiles.find(file => file.id !== fileId)
+        return nextFile?.id || null
+      })
+      setMessages([])
       setStatusMsg('File removed.')
       setBackendStatus('online')
     } catch (e) {
@@ -168,7 +180,7 @@ export function useDocAnalysis(type = 'all') {
 
   return {
     sessionId, uploadedFiles, uploading, messages,
-    thinking, statusMsg, backendStatus,
+    thinking, statusMsg, backendStatus, activeFileId,
     handleUpload, handleAsk, removeUploadedFile, clearChat,
   }
 }

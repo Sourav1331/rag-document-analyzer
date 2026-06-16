@@ -209,8 +209,8 @@ export default function LandingPage() {
                     <div className="max-w-[92%] rounded-2xl rounded-bl-sm border border-white/8 bg-white/5 px-4 py-4 text-sm text-slate-200">
                       <div className="text-xs uppercase tracking-[0.18em] text-slate-400 mb-2">Sources</div>
                       <div className="flex flex-wrap gap-2 mb-4">
-                        <span className="px-2.5 py-1 rounded-full bg-slate-900/80 border border-white/8 text-xs">CTF_Attendance.pdf</span>
-                        <span className="px-2.5 py-1 rounded-full bg-slate-900/80 border border-white/8 text-xs">front_page.pdf</span>
+                        <span className="px-2.5 py-1 rounded-full bg-slate-900/80 border border-white/8 text-xs">Attendance.pdf</span>
+                        <span className="px-2.5 py-1 rounded-full bg-slate-900/80 border border-white/8 text-xs">your_docs.pdf</span>
                       </div>
                       <div className="space-y-2 text-slate-300 leading-relaxed">
                         <p>The document highlights attendance, event schedule, and submission details.</p>
