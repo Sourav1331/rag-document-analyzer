@@ -170,6 +170,7 @@ async def upload_docx(
 class QuestionRequest(BaseModel):
     session_id: str
     namespace: str = "default"
+    file_id: Optional[str] = None
     question: str
     history: list[dict] = Field(default_factory=list)
 
@@ -193,7 +194,7 @@ async def remove_file_endpoint(body: RemoveFileRequest):
 async def ask(body: QuestionRequest):
     store_key = f"{body.session_id}:{body.namespace}"
     try:
-        answer, sources = answer_question(store_key, body.question, body.history)
+        answer, sources = answer_question(store_key, body.question, body.history, body.file_id)
         return {"answer": answer}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -219,7 +220,11 @@ async def ask_stream(body: QuestionRequest):
             from langchain_groq import ChatGroq
             from langchain_core.output_parsers import StrOutputParser
 
-            retriever = STORES[store_key].as_retriever(search_kwargs={"k": 10})
+            search_kwargs = {"k": 10}
+            if body.file_id:
+                search_kwargs["filter"] = {"file_id": body.file_id}
+
+            retriever = STORES[store_key].as_retriever(search_kwargs=search_kwargs)
             docs = retriever.invoke(body.question)
             context, sources = _format_context(docs)
 

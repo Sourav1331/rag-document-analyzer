@@ -225,6 +225,7 @@ def answer_question(
     session_id: str,
     question: str,
     history: list = None,
+    file_id: str | None = None,
 ) -> tuple[str, list[str]]:
 
     if session_id not in STORES:
@@ -243,7 +244,11 @@ def answer_question(
         api_key=api_key,
     )
 
-    retriever = STORES[session_id].as_retriever(search_kwargs={"k": 10})
+    search_kwargs = {"k": 10}
+    if file_id:
+        search_kwargs["filter"] = {"file_id": file_id}
+
+    retriever = STORES[session_id].as_retriever(search_kwargs=search_kwargs)
     docs = retriever.invoke(question)
     context, sources = _format_context(docs)
     image_keywords = [
