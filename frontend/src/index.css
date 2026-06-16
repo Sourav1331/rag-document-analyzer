@@ -14,6 +14,19 @@
   --accent: #7c8cff;
 }
 
+:root.theme-light,
+body.theme-light {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --bg-soft: #eef2ff;
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --border: rgba(15, 23, 42, 0.12);
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #2563eb;
+}
+
 html {
   background: var(--bg);
 }
@@ -31,6 +44,16 @@ body {
   min-height: 100vh;
 }
 
+html.theme-light body,
+body.theme-light {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1000px 600px at 10% -10%, rgba(37, 99, 235, 0.14), transparent 60%),
+    radial-gradient(760px 500px at 88% 8%, rgba(20, 184, 166, 0.12), transparent 55%),
+    radial-gradient(800px 500px at 50% 110%, rgba(245, 158, 11, 0.08), transparent 52%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 48%, #f8fafc 100%);
+}
+
 body::before {
   content: '';
   position: fixed;
@@ -42,6 +65,14 @@ body::before {
   background-size: 72px 72px;
   mask-image: radial-gradient(circle at center, black 45%, transparent 100%);
   opacity: 0.45;
+}
+
+html.theme-light body::before,
+body.theme-light::before {
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+  opacity: 0.5;
 }
 
 .brand {
@@ -61,6 +92,106 @@ body::before {
   backdrop-filter: blur(22px);
   border: 1px solid rgba(148, 163, 184, 0.18);
   box-shadow: 0 24px 80px rgba(2, 6, 23, 0.55);
+}
+
+.theme-light .glass-panel,
+.theme-light .glass-panel-strong {
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
+}
+
+.theme-light .text-gray-100,
+.theme-light .text-slate-100,
+.theme-light .text-slate-200,
+.theme-light .text-white {
+  color: #0f172a !important;
+}
+
+.theme-light .text-slate-300,
+.theme-light .text-slate-400,
+.theme-light .text-slate-500 {
+  color: #475569 !important;
+}
+
+.theme-light .placeholder-slate-500::placeholder,
+.theme-light input::placeholder,
+.theme-light textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+.theme-light [class*="bg-slate-950"],
+.theme-light [class*="bg-slate-900"] {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.theme-light [class*="bg-slate-800"] {
+  background-color: rgba(226, 232, 240, 0.72) !important;
+}
+
+.theme-light [class*="border-slate-800"],
+.theme-light [class*="border-slate-700"],
+.theme-light [class*="border-white"] {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+.theme-light [class*="bg-white/5"],
+.theme-light [class*="bg-white/8"],
+.theme-light [class*="bg-white/10"] {
+  background-color: rgba(255, 255, 255, 0.68) !important;
+}
+
+.theme-light .disabled\:opacity-30:disabled,
+.theme-light .disabled\:opacity-40:disabled,
+.theme-light button:disabled,
+.theme-light textarea:disabled {
+  opacity: 1 !important;
+}
+
+.theme-light button:disabled {
+  background-color: rgba(241, 245, 249, 0.86) !important;
+  border-color: rgba(100, 116, 139, 0.2) !important;
+  color: #94a3b8 !important;
+}
+
+.theme-light textarea:disabled {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(100, 116, 139, 0.22) !important;
+  color: #334155 !important;
+}
+
+.theme-light [class*="bg-gradient-to-r"].text-white,
+.theme-light [class*="bg-gradient-to-br"].text-white,
+.theme-light [class*="from-indigo"].text-white,
+.theme-light .theme-toggle:hover {
+  color: #ffffff !important;
+}
+
+.theme-light .theme-toggle {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+  color: #0f172a !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.theme-light .theme-toggle:hover {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+}
+
+.theme-light textarea {
+  background: rgba(255, 255, 255, 0.9) !important;
+  color: #0f172a !important;
+}
+
+.theme-light .glass-panel,
+.theme-light .glass-panel-strong,
+.theme-light aside,
+.theme-light main {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+.theme-light .border-dashed {
+  border-color: rgba(100, 116, 139, 0.28) !important;
 }
 
 .reveal-up {

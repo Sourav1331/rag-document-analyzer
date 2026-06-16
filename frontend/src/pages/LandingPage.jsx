@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import ThemeToggle from '../components/ThemeToggle'
 
 const features = [
   {
@@ -112,7 +113,7 @@ const faqs = [
   },
 ]
 
-export default function LandingPage() {
+export default function LandingPage({ theme, onToggleTheme }) {
   const navigate = useNavigate()
 
   return (
@@ -126,12 +127,15 @@ export default function LandingPage() {
             <span className="text-base font-semibold text-white brand">DocRAG Studio</span>
             <div className="text-xs text-slate-400">Document intelligence workspace</div>
           </div>
-          <button
-            onClick={() => navigate('/analyze')}
-            className="ml-auto px-5 py-2.5 bg-white text-slate-950 hover:bg-slate-100 text-sm font-bold rounded-xl transition shadow-lg shadow-black/20"
-          >
-            Get started →
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <button
+              onClick={() => navigate('/analyze')}
+              className="px-5 py-2.5 bg-white text-slate-950 hover:bg-slate-100 text-sm font-bold rounded-xl transition shadow-lg shadow-black/20"
+            >
+              Get started →
+            </button>
+          </div>
         </div>
       </header>
 
