@@ -339,7 +339,7 @@ export default function LandingPage({ theme, onToggleTheme }) {
       </main>
 
       <footer className="border-t border-white/8 py-8 text-center text-xs text-slate-500">
-        DocRAG Studio · AI-powered document analysis · Built with LangChain, Groq & React
+        DocRAG Studio · AI-powered document analysis
       </footer>
     </div>
   )
