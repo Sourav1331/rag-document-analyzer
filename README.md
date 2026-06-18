@@ -168,33 +168,6 @@ docker compose up --build
 
 ---
 
-## Upload Storage
-
-The backend has a persistent upload folder mounted into the container with this Docker Compose volume:
-
-```yaml
-volumes:
-  - ./backend/uploads:/app/uploads
-```
-
-This means:
-
-- On your machine, files live in `backend/uploads/`
-- Inside Docker, the backend can access the folder at `/app/uploads`
-- `backend/uploads/` is ignored by Git, so user documents are not committed
-- Files saved to `backend/uploads/` remain after the container is rebuilt or restarted
-
-Current backend behavior:
-
-- Uploaded files are copied to a temporary folder for parsing
-- Text chunks are stored in ChromaDB in memory
-- The temporary parsed upload is deleted after indexing
-- The `backend/uploads/` folder is available for persistent file storage, but uploads are not permanently saved there unless the backend is changed to write to `/app/uploads`
-- The current ChromaDB data is not persisted to a project folder
-
-Use this setup when users only need to ask questions during the active backend session. If the backend restarts, users need to upload their documents again.
-
----
 
 ## Environment Variables
 
