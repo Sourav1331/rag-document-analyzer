@@ -27,7 +27,7 @@ An AI-powered document analysis tool built with React, FastAPI, LangChain, and G
 |-----------|---------------------------------------------|
 | Frontend  | React 18, Vite, Tailwind CSS, React Router   |
 | Backend   | FastAPI, Python 3.10+                        |
-| RAG       | LangChain, ChromaDB, HuggingFace Embeddings  |
+| RAG       | LangChain, ChromaDB, FastEmbed Embeddings    |
 | LLM       | Groq API (LLaMA 3.1 8B Instant)              |
 | Parsing   | PyPDF, Pandas, openpyxl, Unstructured        |
 
@@ -63,12 +63,17 @@ rag-document-analyzer/
 |   |   `-- docrag-icon.svg
 |   |-- index.html
 |   |-- package.json
+|   |-- Dockerfile
+|   |-- nginx.conf
 |   `-- vite.config.js
 |-- backend/
 |   |-- main.py                      # FastAPI routes
 |   |-- rag.py                       # RAG pipeline
 |   |-- requirements.txt
+|   |-- Dockerfile
+|   |-- uploads/                     # Runtime upload storage for Docker/local use
 |   `-- .env.example
+|-- docker-compose.yaml
 `-- README.md
 ```
 
@@ -123,15 +128,93 @@ Frontend runs at `http://localhost:5173`
 
 ---
 
+## Docker Deployment
+
+The project includes Docker files for both services:
+
+- `backend/Dockerfile` runs FastAPI with Uvicorn on port `8000`
+- `frontend/Dockerfile` builds the Vite app and serves it with Nginx on port `80`
+- `docker-compose.yaml` runs both containers together
+
+Before starting Docker, make sure `backend/.env` exists and contains your Groq API key:
+
+```env
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+Start the full app:
+
+```bash
+docker compose up --build
+```
+
+After startup:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+- Health check: `http://localhost:8000/health`
+
+Stop the containers:
+
+```bash
+docker compose down
+```
+
+Rebuild after code changes:
+
+```bash
+docker compose up --build
+```
+
+---
+
+## Upload Storage
+
+The backend has a persistent upload folder mounted into the container with this Docker Compose volume:
+
+```yaml
+volumes:
+  - ./backend/uploads:/app/uploads
+```
+
+This means:
+
+- On your machine, files live in `backend/uploads/`
+- Inside Docker, the backend can access the folder at `/app/uploads`
+- `backend/uploads/` is ignored by Git, so user documents are not committed
+- Files saved to `backend/uploads/` remain after the container is rebuilt or restarted
+
+Current backend behavior:
+
+- Uploaded files are copied to a temporary folder for parsing
+- Text chunks are stored in ChromaDB in memory
+- The temporary parsed upload is deleted after indexing
+- The `backend/uploads/` folder is available for persistent file storage, but uploads are not permanently saved there unless the backend is changed to write to `/app/uploads`
+- The current ChromaDB data is not persisted to a project folder
+
+Use this setup when users only need to ask questions during the active backend session. If the backend restarts, users need to upload their documents again.
+
+---
+
 ## Environment Variables
 
 Create `backend/.env`:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
+MAX_FILE_SIZE_MB=20
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 Get your free API key at [https://console.groq.com](https://console.groq.com)
+
+For the frontend, `frontend/.env.local` can define the backend URL:
+
+```env
+VITE_API_URL=http://localhost:8000
+```
+
+When deploying the frontend separately, set `VITE_API_URL` to the public backend URL.
 
 ---
 
@@ -165,12 +248,15 @@ Get your free API key at [https://console.groq.com](https://console.groq.com)
 ## How It Works
 
 1. Upload - file is saved temporarily, parsed, and split into chunks
-2. Embed - chunks are embedded using `sentence-transformers/all-MiniLM-L6-v2`
-3. Store - embeddings are stored in ChromaDB using a unique collection per analyzer session
-4. Activate - the newest uploaded file becomes the active source for the current analyzer
-5. Retrieve - top chunks are fetched only from the active file
-6. Generate - Groq LLaMA answers using only the retrieved context
-7. Respond - answer and source file names are returned to the frontend
+2. Validate - empty chunks and unreadable text are rejected before embedding
+3. Embed - chunks are embedded using FastEmbed model `BAAI/bge-small-en-v1.5`
+4. Store - embeddings are stored in ChromaDB using a unique collection per analyzer session
+5. Activate - the newest uploaded file becomes the active source for the current analyzer
+6. Retrieve - top chunks are fetched only from the active file
+7. Generate - Groq LLaMA answers using only the retrieved context
+8. Respond - answer and source file names are returned to the frontend
+
+ChromaDB is currently in-memory. There is no `chroma_db/` folder in this project, and uploaded document embeddings disappear when the backend process restarts.
 
 ---
 
@@ -205,3 +291,17 @@ Get your free API key at [https://console.groq.com](https://console.groq.com)
 **GROQ_API_KEY error**
 - Make sure `.env` file exists in the `backend/` folder
 - Restart the backend after editing `.env`
+
+**"No readable text found in this document"**
+- The file may be empty, scanned, image-only, or not extractable by the current parser
+- Try selecting and copying text from the PDF; if text cannot be selected, OCR is required
+- This is expected for scanned PDFs unless OCR support is added
+
+**Docker upload files are missing**
+- Make sure `backend/uploads/` exists
+- Make sure Docker Compose includes `./backend/uploads:/app/uploads`
+- Do not store important uploaded files only inside the container filesystem
+
+**Frontend cannot reach backend in deployment**
+- Set `VITE_API_URL` to the deployed backend URL before building the frontend
+- Make sure `ALLOWED_ORIGINS` in `backend/.env` includes the frontend origin
