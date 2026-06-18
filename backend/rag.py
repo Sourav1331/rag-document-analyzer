@@ -185,18 +185,34 @@ def build_store(session_id: str, file_paths: list[str], file_id: str = None) -> 
         chunk_overlap=200,
     )
     chunks = splitter.split_documents(all_docs)
+    chunks = [
+        chunk for chunk in chunks
+        if chunk.page_content.strip() and re.search(r"[A-Za-z0-9]", chunk.page_content)
+    ]
+
+    if not chunks:
+        raise ValueError(
+            "No readable text found in this document. "
+        )
 
     # get_embeddings() triggers lazy load here, not at startup
-    if session_id not in STORES:
-        STORES[session_id] = Chroma.from_documents(
-            chunks,
-            embedding=get_embeddings(),
-            collection_name=_collection_name(session_id),
-        )
-        ids = STORES[session_id].get()["ids"]
-    else:
-        ids = [str(uuid.uuid4()) for _ in chunks]
-        STORES[session_id].add_documents(chunks, ids=ids)
+    try:
+        if session_id not in STORES:
+            STORES[session_id] = Chroma.from_documents(
+                chunks,
+                embedding=get_embeddings(),
+                collection_name=_collection_name(session_id),
+            )
+            ids = STORES[session_id].get()["ids"]
+        else:
+            ids = [str(uuid.uuid4()) for _ in chunks]
+            STORES[session_id].add_documents(chunks, ids=ids)
+    except ValueError as e:
+        if "Expected Embeddings to be non-empty" in str(e):
+            raise ValueError(
+                "No readable text found in this document. "
+            ) from e
+        raise
 
     if file_id:
         STORE_FILES.setdefault(session_id, {})[file_id] = ids
