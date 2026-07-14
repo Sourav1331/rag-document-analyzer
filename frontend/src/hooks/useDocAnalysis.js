@@ -2,7 +2,10 @@ import { useState } from 'react'
 import axios from 'axios'
 import { v4 as uuidv4 } from 'uuid'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const DEFAULT_API_BASE_URL = import.meta.env.PROD
+  ? 'https://rag-document-analyzer.onrender.com'
+  : 'http://localhost:8000'
+const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '')
 
 const UPLOAD_ENDPOINTS = {
   csv:   '/upload/csv',
@@ -66,7 +69,7 @@ export function useDocAnalysis(type = 'all') {
         if (e.response?.status === 400) detail = e.response.data?.detail || 'Wrong file type.'
         else if (e.response?.status === 413) detail = 'File too large. Max 20MB.'
         else if (e.response?.status === 500) detail = 'Server error. Check your GROQ_API_KEY.'
-        else if (!e.response) detail = 'Cannot reach backend. Is it running on port 8000?'
+        else if (!e.response) detail = `Cannot reach backend at ${API_BASE_URL}.`
         setBackendStatus(e.response ? 'online' : 'offline')
       }
       setStatusMsg(detail)
