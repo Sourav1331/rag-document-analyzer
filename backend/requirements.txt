@@ -9,8 +9,11 @@ langchain-community
 langchain-text-splitters
 langchain-groq
 
-chromadb
-fastembed
+sentence-transformers
+qdrant-client
+supabase
+redis
+rq
 
 pypdf
 unstructured
@@ -21,3 +24,6 @@ openpyxl
 xlrd
 
 groq
+psutil
+pytest
+httpx

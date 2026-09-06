@@ -1,48 +1,60 @@
-import uuid, os, shutil, tempfile, asyncio, json
+import asyncio
+import logging
+import os
+import tempfile
+import time
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
-from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse as FastAPIStreamingResponse
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from groq import GroqError
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
-from rag import build_store, answer_question, STORES, _format_context, PROMPT_WITH_HISTORY, remove_file
-import os
-os.environ["ONNXRUNTIME_DISABLE_DEVICE_DISCOVERY"] = "1" 
-
+os.environ["ONNXRUNTIME_DISABLE_DEVICE_DISCOVERY"] = "1"
 load_dotenv()
 
-ALLOWED_EXTENSIONS = {".pdf", ".csv", ".docx", ".doc", ".txt", ".xlsx", ".xls"}
-MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "20"))
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
-    ).split(",")
-    if origin.strip()
-]
+from config import settings  # noqa: E402
+from services.document_service import validate_filename, validate_size  # noqa: E402
+from services.embedding_service import get_embedding_model  # noqa: E402
+from services.errors import AppError, FileTooLargeError, ProcessingError, to_http_error  # noqa: E402
+from services.factory import build_services  # noqa: E402
+from services.models import FileRecord  # noqa: E402
+from services.vector_store_service import strict_filter  # noqa: E402
+
+logging.basicConfig(level=settings.log_level)
+logger = logging.getLogger(__name__)
+
+UPLOAD_EXTENSIONS = {
+    "default": {".pdf", ".csv", ".docx", ".doc", ".txt", ".xlsx", ".xls"},
+    "csv": {".csv"},
+    "pdf": {".pdf"},
+    "excel": {".xlsx", ".xls"},
+    "text": {".txt"},
+    "docx": {".docx", ".doc"},
+}
 
 
-async def warmup():
-    """Load the embedding model in the background after the server has started."""
+async def warmup() -> None:
     try:
         loop = asyncio.get_event_loop()
-        from rag import get_embeddings
-        await loop.run_in_executor(None, get_embeddings)
-        print("Embeddings model loaded successfully.")
-    except Exception as e:
-        print(f"Warmup failed (non-fatal): {e}")
+        await loop.run_in_executor(None, get_embedding_model)
+        logger.info("Embeddings model loaded successfully.")
+    except Exception as exc:
+        logger.warning("Warmup failed: %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Server binds to port immediately, warmup runs in background
+    services = build_services()
+    app.state.services = services
+    try:
+        services["vector_store"].ensure_collection()
+    except Exception:
+        logger.exception("Vector collection setup failed.")
     asyncio.create_task(warmup())
     yield
 
@@ -51,126 +63,175 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if ALLOWED_ORIGINS == ["*"] else ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"] if settings.allowed_origins == ["*"] else settings.allowed_origins,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 
-def _safe_filename(filename: str, allowed_exts: set = None) -> str:
-    if not filename:
-        raise HTTPException(status_code=400, detail="Invalid filename.")
-    safe_name = os.path.basename(filename)
-    ext = Path(safe_name).suffix.lower()
-    check_exts = allowed_exts or ALLOWED_EXTENSIONS
-    if ext not in check_exts:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Wrong file type: '{ext}'. This endpoint only accepts: {', '.join(sorted(check_exts))}."
-        )
-    return safe_name
-
-
-def _copy_with_limit(src, dest: str) -> None:
-    size = 0
-    with open(dest, "wb") as out:
-        while True:
-            chunk = src.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > MAX_FILE_SIZE_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File too large. Max size is {MAX_FILE_SIZE_MB}MB."
-                )
-            out.write(chunk)
-
-
-async def _handle_upload(files, session_id, allowed_exts=None, namespace="default"):
-    sid = session_id or str(uuid.uuid4())
-    store_key = f"{sid}:{namespace}"
-    tmp_dir = tempfile.mkdtemp()
-    saved_files = []
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    started = time.perf_counter()
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     try:
-        for f in files:
-            safe_name = _safe_filename(f.filename, allowed_exts)
-            dest = os.path.join(tmp_dir, f"{uuid.uuid4()}-{safe_name}")
-            _copy_with_limit(f.file, dest)
-            file_id = str(uuid.uuid4())
-            try:
-                msg = build_store(store_key, [dest], file_id=file_id)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+        response = await call_next(request)
+    except Exception:
+        logger.exception("request_failed request_id=%s route=%s", request_id, request.url.path)
+        raise
+    duration = time.perf_counter() - started
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Process-Time"] = f"{duration:.4f}"
+    logger.info(
+        "request request_id=%s route=%s status=%s duration_seconds=%.4f",
+        request_id,
+        request.url.path,
+        response.status_code,
+        duration,
+    )
+    return response
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(_: Request, exc: AppError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": {"code": exc.code, "message": exc.message}},
+    )
+
+
+def services(request: Request):
+    return request.app.state.services
+
+
+def _storage_path(session_id: str, namespace: str, file_id: str, filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    return f"{session_id}/{namespace}/{file_id}{ext}"
+
+
+async def _read_upload_with_limit(upload: UploadFile) -> bytes:
+    size = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        size += len(chunk)
+        validate_size(size)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _handle_upload(
+    request: Request,
+    files: list[UploadFile],
+    session_id: Optional[str],
+    allowed_exts: set[str],
+    namespace: str,
+):
+    sid = session_id or str(uuid.uuid4())
+    svc = services(request)
+    saved_files = []
+    started = time.perf_counter()
+
+    for upload in files:
+        safe_name = validate_filename(upload.filename or "", allowed_exts)
+        file_id = str(uuid.uuid4())
+        data = await _read_upload_with_limit(upload)
+        validate_size(len(data))
+        storage_path = _storage_path(sid, namespace, file_id, safe_name)
+        record = FileRecord(
+            id=file_id,
+            session_id=sid,
+            analyzer_type=namespace,
+            original_filename=safe_name,
+            mime_type=upload.content_type,
+            file_size=len(data),
+            storage_path=storage_path,
+            status="uploaded",
+        )
+        svc["metadata"].create_file(record)
+        tmp_path = None
+        try:
+            svc["storage"].upload(storage_path, data, upload.content_type)
+            suffix = Path(safe_name).suffix
+            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+            os.close(fd)
+            Path(tmp_path).write_bytes(data)
+            svc["metadata"].update_file(file_id, status="processing")
+            if settings.ingestion_mode == "redis":
+                svc["jobs"].enqueue_or_run(file_id, None, "redis")
+                current = svc["metadata"].get_file(file_id) or record
+            else:
+                current = svc["jobs"].enqueue_or_run(file_id, tmp_path, "sync")
             saved_files.append(
                 {
-                    "name": f.filename,
+                    "name": safe_name,
+                    "filename": safe_name,
                     "file_id": file_id,
-                    "message": msg,
+                    "id": file_id,
+                    "status": current.status,
+                    "chunk_count": current.chunk_count,
+                    "error": current.error_message,
+                    "message": f"{current.status}: {safe_name}",
                 }
             )
-        return {
-            "session_id": sid,
-            "namespace": namespace,
-            "message": f"Loaded {len(saved_files)} file(s).",
-            "files": saved_files,
-        }
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        except FileTooLargeError:
+            svc["metadata"].update_file(file_id, status="failed", error_message="File exceeds configured limits.")
+            raise
+        except AppError:
+            raise
+        except Exception as exc:
+            logger.exception("upload_failed file_id=%s", file_id)
+            svc["metadata"].update_file(file_id, status="failed", error_message="Upload failed.")
+            raise ProcessingError("Upload failed.") from exc
+        finally:
+            if tmp_path:
+                Path(tmp_path).unlink(missing_ok=True)
+            data = b""
+
+    logger.info("upload_total_seconds=%.3f files=%s", time.perf_counter() - started, len(saved_files))
+    return {
+        "session_id": sid,
+        "namespace": namespace,
+        "message": f"Accepted {len(saved_files)} file(s).",
+        "files": saved_files,
+    }
 
 
 @app.post("/upload")
-async def upload(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
-    return await _handle_upload(files, session_id, namespace="default")
+async def upload(request: Request, files: list[UploadFile] = File(...), session_id: Optional[str] = Form(default=None)):
+    return await _handle_upload(request, files, session_id, UPLOAD_EXTENSIONS["default"], "default")
 
 
 @app.post("/upload/csv")
-async def upload_csv(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
-    return await _handle_upload(files, session_id, allowed_exts={".csv"}, namespace="csv")
+async def upload_csv(request: Request, files: list[UploadFile] = File(...), session_id: Optional[str] = Form(default=None)):
+    return await _handle_upload(request, files, session_id, UPLOAD_EXTENSIONS["csv"], "csv")
 
 
 @app.post("/upload/pdf")
-async def upload_pdf(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
-    return await _handle_upload(files, session_id, allowed_exts={".pdf"}, namespace="pdf")
+async def upload_pdf(request: Request, files: list[UploadFile] = File(...), session_id: Optional[str] = Form(default=None)):
+    return await _handle_upload(request, files, session_id, UPLOAD_EXTENSIONS["pdf"], "pdf")
 
 
 @app.post("/upload/excel")
-async def upload_excel(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
-    return await _handle_upload(files, session_id, allowed_exts={".xlsx", ".xls"}, namespace="excel")
+async def upload_excel(request: Request, files: list[UploadFile] = File(...), session_id: Optional[str] = Form(default=None)):
+    return await _handle_upload(request, files, session_id, UPLOAD_EXTENSIONS["excel"], "excel")
 
 
 @app.post("/upload/txt")
-async def upload_txt(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
-    return await _handle_upload(files, session_id, allowed_exts={".txt"}, namespace="text")
+async def upload_txt(request: Request, files: list[UploadFile] = File(...), session_id: Optional[str] = Form(default=None)):
+    return await _handle_upload(request, files, session_id, UPLOAD_EXTENSIONS["text"], "text")
 
 
 @app.post("/upload/docx")
-async def upload_docx(
-    files: list[UploadFile] = File(...),
-    session_id: Optional[str] = Form(default=None)
-):
-    return await _handle_upload(files, session_id, allowed_exts={".docx", ".doc"}, namespace="docx")
+async def upload_docx(request: Request, files: list[UploadFile] = File(...), session_id: Optional[str] = Form(default=None)):
+    return await _handle_upload(request, files, session_id, UPLOAD_EXTENSIONS["docx"], "docx")
 
 
 class QuestionRequest(BaseModel):
     session_id: str
     namespace: str = "default"
-    file_id: Optional[str] = None
+    file_id: str
     question: str
     history: list[dict] = Field(default_factory=list)
 
@@ -181,89 +242,76 @@ class RemoveFileRequest(BaseModel):
     file_id: str
 
 
+@app.get("/files/{file_id}/status")
+async def file_status(request: Request, file_id: str):
+    record = services(request)["metadata"].get_file(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "File not found."})
+    return {
+        "file_id": record.id,
+        "status": record.status,
+        "chunk_count": record.chunk_count,
+        "error": record.error_message,
+        "filename": record.original_filename,
+    }
+
+
 @app.post("/remove-file")
-async def remove_file_endpoint(body: RemoveFileRequest):
-    store_key = f"{body.session_id}:{body.namespace}"
-    ok = remove_file(store_key, body.file_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="File not found in session.")
-    return {"message": "File removed."}
+async def remove_file_endpoint(request: Request, body: RemoveFileRequest):
+    svc = services(request)
+    record = svc["metadata"].get_file(body.file_id)
+    if record is None or record.status == "deleted":
+        return {"message": "File already deleted.", "status": "deleted"}
+    if record.session_id != body.session_id or record.analyzer_type != body.namespace:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "File not found."})
+
+    started = time.perf_counter()
+    await asyncio.to_thread(svc["metadata"].update_file, body.file_id, status="deleting")
+    await asyncio.to_thread(
+        svc["vector_store"].delete_file,
+        strict_filter(record.session_id, record.analyzer_type, record.id, record.user_id)
+    )
+    if record.storage_path:
+        try:
+            await asyncio.to_thread(svc["storage"].delete, record.storage_path)
+        except Exception:
+            logger.exception("storage_delete_failed file_id=%s", body.file_id)
+    await asyncio.to_thread(svc["metadata"].update_file, body.file_id, status="deleted")
+    logger.info("deletion_seconds=%.3f file_id=%s", time.perf_counter() - started, body.file_id)
+    return {"message": "File removed.", "status": "deleted"}
 
 
 @app.post("/ask")
-async def ask(body: QuestionRequest):
-    store_key = f"{body.session_id}:{body.namespace}"
+async def ask(request: Request, body: QuestionRequest):
     try:
-        answer, sources = answer_question(store_key, body.question, body.history, body.file_id)
+        answer = services(request)["rag"].answer(
+            session_id=body.session_id,
+            analyzer_type=body.namespace,
+            file_id=body.file_id,
+            question=body.question,
+            history=body.history,
+        )
         return {"answer": answer}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except GroqError as e:
-        status = getattr(e, "status_code", None)
-        code = status if isinstance(status, int) and 400 <= status <= 599 else 502
-        raise HTTPException(status_code=code, detail=str(e))
+    except AppError as exc:
+        raise to_http_error(exc)
 
 
 @app.post("/ask-stream")
-async def ask_stream(body: QuestionRequest):
-    store_key = f"{body.session_id}:{body.namespace}"
-
-    if store_key not in STORES:
-        raise HTTPException(status_code=400, detail="No documents loaded for this session.")
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not set.")
-
-    async def generate():
-        try:
-            from langchain_groq import ChatGroq
-            from langchain_core.output_parsers import StrOutputParser
-
-            search_kwargs = {"k": 10}
-            if body.file_id:
-                search_kwargs["filter"] = {"file_id": body.file_id}
-
-            retriever = STORES[store_key].as_retriever(search_kwargs=search_kwargs)
-            docs = retriever.invoke(body.question)
-            context, sources = _format_context(docs)
-
-            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
-
-            llm = ChatGroq(
-                model="llama-3.1-8b-instant",
-                temperature=0,
-                api_key=api_key,
-                streaming=True,
-            )
-
-            chain = PROMPT_WITH_HISTORY | llm | StrOutputParser()
-
-            history_text = ""
-            if body.history:
-                for msg in body.history[-6:]:
-                    role = "User" if msg.get("role") == "user" else "Assistant"
-                    content = msg.get("content") or msg.get("text") or ""
-                    history_text += f"{role}: {content}\n"
-
-            async for chunk in chain.astream({
-                "context": context,
-                "history": history_text,
-                "question": body.question,
-            }):
-                yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
-
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
-
-    return FastAPIStreamingResponse(
-        generate(),
+async def ask_stream(request: Request, body: QuestionRequest):
+    stream = services(request)["rag"].stream_answer(
+        session_id=body.session_id,
+        analyzer_type=body.namespace,
+        file_id=body.file_id,
+        question=body.question,
+        history=body.history,
+    )
+    return StreamingResponse(
+        stream,
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
 
@@ -273,7 +321,26 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def readiness(request: Request):
+    svc = services(request)
+    checks = {}
+    status_code = 200
+    for name in ("metadata", "storage", "vector_store"):
+        try:
+            checks[name] = bool(svc[name].ping())
+        except Exception:
+            logger.exception("readiness_check_failed dependency=%s", name)
+            checks[name] = False
+            status_code = 503
+    checks["groq_configured"] = bool(settings.groq_api_key)
+    if not checks["groq_configured"]:
+        status_code = 503
+    return JSONResponse(status_code=status_code, content={"status": "ready" if status_code == 200 else "not_ready", "checks": checks})
+
+
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, workers=1)

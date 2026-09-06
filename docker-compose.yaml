@@ -1,4 +1,10 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: docrag-redis
+    ports:
+      - "6379:6379"
+
   backend:
     build: ./backend
     container_name: docrag-backend
@@ -8,6 +14,21 @@ services:
       - ./backend/.env
     volumes:
       - ./backend/uploads:/app/uploads
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+  worker:
+    build: ./backend
+    container_name: docrag-worker
+    command: rq worker ingestion --url redis://redis:6379/0
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      - redis
 
   frontend:
     build: ./frontend

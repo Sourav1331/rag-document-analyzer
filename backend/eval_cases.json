@@ -1,0 +1,22 @@
+[
+  {
+    "file_id": "replace-with-file-id-after-upload",
+    "session_id": "replace-with-session-id",
+    "analyzer_type": "pdf",
+    "question": "What is the main conclusion?",
+    "expected_source_file": "sample.pdf",
+    "expected_keywords": ["conclusion"],
+    "expected_page": null,
+    "should_be_found": true
+  },
+  {
+    "file_id": "replace-with-file-id-after-upload",
+    "session_id": "replace-with-session-id",
+    "analyzer_type": "pdf",
+    "question": "What is the author's passport number?",
+    "expected_source_file": "sample.pdf",
+    "expected_keywords": [],
+    "expected_page": null,
+    "should_be_found": false
+  }
+]
