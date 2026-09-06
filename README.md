@@ -8,11 +8,12 @@ An AI-powered document analysis tool built with React, FastAPI, Qdrant, Supabase
 
 - 4 dedicated analyzers: PDF, CSV, Excel, and Text/DOCX
 - Per-tab isolation so switching analyzers does not reuse another tab's chat state
+- Session-only uploads: files disappear when the analyzer is closed or the page is reloaded
 - Per-file retrieval so the newest upload becomes active and questions are scoped to that file
 - File removal with an `x` button that deletes the stored chunks as well
 - File type validation in both frontend and backend
 - RAG pipeline with persistent Qdrant vectors and Supabase file metadata
-- Groq LLaMA inference for fast answers
+- Groq inference with the current `openai/gpt-oss-20b` production model
 - Structured responses with clean rendering for headings, bullets, and links
 - Suggested questions per file type
 - Source citations that show which file the answer came from
@@ -27,8 +28,8 @@ An AI-powered document analysis tool built with React, FastAPI, Qdrant, Supabase
 |-----------|---------------------------------------------|
 | Frontend  | React 18, Vite, Tailwind CSS, React Router   |
 | Backend   | FastAPI, Python 3.10+                        |
-| RAG       | LangChain, Qdrant Cloud, Supabase, all-MiniLM-L6-v2 |
-| LLM       | Groq API (LLaMA 3.1 8B Instant)              |
+| RAG       | LangChain, Qdrant Cloud, Supabase, `all-MiniLM-L6-v2` |
+| LLM       | Groq API (`openai/gpt-oss-20b`)               |
 | Parsing   | PyPDF, Pandas, openpyxl, Unstructured        |
 
 ---
@@ -106,6 +107,10 @@ cp .env.example .env
 # Open .env and add Groq, Qdrant, and Supabase configuration
 ```
 
+Supabase and Qdrant are used when their URL and API key variables are present. If
+they are omitted for local development, the backend falls back to in-memory
+metadata/vectors and the `backend/uploads/` directory.
+
 Start the backend:
 
 ```bash
@@ -142,6 +147,7 @@ Before starting Docker, make sure `backend/.env` exists and contains your Groq A
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
 Start the full app:
@@ -177,6 +183,7 @@ Create `backend/.env`:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=openai/gpt-oss-20b
 QDRANT_URL=https://your-cluster.qdrant.io
 QDRANT_API_KEY=your_qdrant_api_key
 QDRANT_COLLECTION_NAME=docrag_chunks_v1
@@ -185,13 +192,16 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 SUPABASE_STORAGE_BUCKET=documents
 REDIS_URL=redis://localhost:6379/0
 INGESTION_MODE=sync
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_BATCH_SIZE=8
+VECTOR_SIZE=384
 MAX_FILE_SIZE_MB=10
 MAX_TEXT_CHARACTERS=1500000
 MAX_CHUNKS_PER_FILE=1000
 CHUNK_SIZE=800
 CHUNK_OVERLAP=120
 RETRIEVAL_K=4
-EMBEDDING_BATCH_SIZE=8
+RETRIEVAL_SCORE_THRESHOLD=
 VECTOR_UPSERT_BATCH_SIZE=64
 SESSION_EXPIRY_HOURS=72
 LOG_LEVEL=INFO
@@ -199,6 +209,10 @@ ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 Get your free API key at [https://console.groq.com](https://console.groq.com)
+
+`GROQ_MODEL` must be an active model available to the Groq account. The default
+`openai/gpt-oss-20b` replaces the retired `llama3-8b-8192` and
+`llama-3.1-8b-instant` model IDs.
 
 For the frontend, `frontend/.env.local` can define the backend URL:
 
@@ -242,13 +256,13 @@ When deploying the frontend separately, set `VITE_API_URL` to the public backend
 ## How It Works
 
 1. Upload validates extension, size, and filename.
-2. File metadata is stored in Supabase with status `uploaded` then `processing`.
-3. The original file is stored in Supabase Storage or local storage for development.
+2. File metadata is stored in Supabase with status `uploaded` then `processing` (or in-memory locally).
+3. The original file is stored in Supabase Storage or `backend/uploads/` locally.
 4. Ingestion extracts text, rejects empty or oversized documents, chunks text, embeds in batches, and upserts vectors into one Qdrant collection.
 5. Each vector carries `session_id`, `analyzer_type`, `file_id`, `filename`, `chunk_id`, `chunk_index`, source metadata, and upload timestamps.
-6. The frontend polls `/files/{file_id}/status` and disables questions until the active file is `ready`.
+6. The frontend keeps file metadata only in React memory, polls `/files/{file_id}/status`, and disables questions until the active file is `ready`.
 7. `/ask-stream` embeds only the query, searches Qdrant with strict filters, builds a grounded prompt, and streams Groq tokens.
-8. Delete removes only points matching the selected session/analyzer/file filters, then marks metadata deleted.
+8. Delete removes only points matching the selected session/analyzer/file filters, then marks metadata deleted. The UI removes the file immediately while remote cleanup runs.
 
 The legacy in-memory Chroma implementation has been removed from request handling. Existing local Chroma data cannot be reused safely because the embedding model changed from FastEmbed `BAAI/bge-small-en-v1.5` to `sentence-transformers/all-MiniLM-L6-v2`; re-upload documents to create Qdrant vectors.
 
@@ -356,7 +370,7 @@ Edit `backend/eval_cases.json` with real uploaded `file_id` and `session_id` val
 - Restart the backend if you changed retrieval or storage code
 
 **Only partial answers (missing projects/details)**
-- Chunking is already tuned with `chunk_size=1500`, `chunk_overlap=200`, and `k=10`
+- Chunking defaults to `chunk_size=800`, `chunk_overlap=120`, and retrieval `k=4`
 - If still happening, try asking more specific questions
 
 **GROQ_API_KEY error**
