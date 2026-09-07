@@ -23,7 +23,7 @@ class Settings:
     embedding_model: str = os.getenv(
         "EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"
     )
-    embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 8)
+    embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 4)
     vector_size: int = _int_env("VECTOR_SIZE", 384)
 
     qdrant_url: str | None = os.getenv("QDRANT_URL")

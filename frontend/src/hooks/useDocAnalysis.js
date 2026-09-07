@@ -107,7 +107,13 @@ export function useDocAnalysis(type = 'all') {
       let detail = errorText(error, 'Upload failed. Is the backend running?')
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 413) detail = errorText(error, 'File too large.')
-        else if (!error.response) detail = `Cannot reach backend at ${API_BASE_URL}.`
+        else if (!error.response) {
+          if (error.code === 'ECONNABORTED') {
+            detail = 'Backend request timed out while processing the document.';
+          } else {
+            detail = 'Backend connection was interrupted while processing the document.';
+          }
+        }
         setBackendStatus(error.response ? 'online' : 'offline')
       }
       setStatusMsg(detail)

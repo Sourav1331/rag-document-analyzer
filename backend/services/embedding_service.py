@@ -18,9 +18,25 @@ class EmbeddingService:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+
         model = get_embedding_model()
-        vectors = model.embed(texts, batch_size=self.batch_size)
-        return [vector.tolist() for vector in vectors]
+
+        vectors = []
+
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start:start + self.batch_size]
+
+            batch_vectors = model.embed(
+                batch,
+                batch_size=self.batch_size,
+            )
+
+            vectors.extend(
+                vector.tolist()
+                for vector in batch_vectors
+            )
+
+        return vectors
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
