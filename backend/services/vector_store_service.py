@@ -125,8 +125,11 @@ class QdrantVectorStoreService(VectorStoreService):
 
         self.client = QdrantClient(url=url, api_key=api_key)
         self.collection_name = collection_name
+        self._collection_ready = False
 
     def ensure_collection(self) -> None:
+        if self._collection_ready:
+            return
         from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
 
         collections = self.client.get_collections().collections
@@ -146,6 +149,7 @@ class QdrantVectorStoreService(VectorStoreService):
                 message = str(exc).lower()
                 if "already exists" not in message and "conflict" not in message:
                     raise
+        self._collection_ready = True
 
     def upsert_chunks(
         self,
