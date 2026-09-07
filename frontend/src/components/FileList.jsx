@@ -27,7 +27,8 @@ export default function FileList({ files, activeFileId, onRemove, onSelect }) {
         const fileId = typeof file === 'object' ? file?.id : null
         const isActive = activeFileId && fileId === activeFileId
         const status = typeof file === 'object' ? file?.status || 'ready' : 'ready'
-        const statusLabel = isActive ? 'Active' : status.charAt(0).toUpperCase() + status.slice(1)
+        const isReady = status.toLowerCase() === 'ready'
+        const statusLabel = isActive && isReady ? 'Active' : status.charAt(0).toUpperCase() + status.slice(1)
 
         return (
           <div
@@ -40,7 +41,7 @@ export default function FileList({ files, activeFileId, onRemove, onSelect }) {
             </span>
             <span className="min-w-0 flex-1 truncate text-slate-200">{name}</span>
             <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
-              isActive
+              isActive && isReady
                 ? 'text-sky-200 bg-sky-500/10 border-sky-500/20'
                 : statusStyles[status] || statusStyles.ready
             }`}>

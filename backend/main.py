@@ -52,17 +52,10 @@ async def process_file_in_background(svc: dict, file_id: str) -> None:
     try:
         # Read from storage instead of the request's temporary file. The
         # temporary upload file is cleaned up as soon as this handler returns.
-        if settings.ingestion_mode == "redis":
-            try:
-                await asyncio.to_thread(
-                    svc["jobs"].enqueue_or_run, file_id, None, "redis"
-                )
-                return
-            except Exception:
-                logger.exception(
-                    "redis_unavailable_falling_back_to_sync file_id=%s", file_id
-                )
-
+        # Redis is intentionally not used here: a paused/missing worker would
+        # leave the document permanently stuck in "processing". A separate
+        # worker can still be introduced later, but the web deployment must
+        # remain functional without Redis.
         await asyncio.to_thread(
             svc["jobs"].enqueue_or_run, file_id, None, "sync"
         )
