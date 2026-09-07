@@ -37,15 +37,26 @@ UPLOAD_EXTENSIONS = {
 }
 
 
+async def initialize_vector_store(vector_store) -> None:
+    """Initialize remote vector storage without blocking Uvicorn port binding."""
+    try:
+        await asyncio.to_thread(vector_store.ensure_collection)
+        logger.info("Vector collection initialized successfully.")
+    except Exception:
+        # The service should still start so Render can health-check it. The
+        # dependency state is exposed through /ready and retried on ingestion.
+        logger.exception("Vector collection setup failed during background initialization.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     services = build_services()
     app.state.services = services
-    try:
-        services["vector_store"].ensure_collection()
-    except Exception:
-        logger.exception("Vector collection setup failed.")
+    vector_init_task = asyncio.create_task(
+        initialize_vector_store(services["vector_store"])
+    )
     yield
+    vector_init_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
