@@ -162,7 +162,12 @@ async def _handle_upload(
                 svc["jobs"].enqueue_or_run(file_id, None, "redis")
                 current = svc["metadata"].get_file(file_id) or record
             else:
-                current = svc["jobs"].enqueue_or_run(file_id, tmp_path, "sync")
+                current = await asyncio.to_thread(
+                svc["jobs"].enqueue_or_run,
+                file_id,
+                tmp_path,
+                "sync",
+            )
             saved_files.append(
                 {
                     "name": safe_name,
