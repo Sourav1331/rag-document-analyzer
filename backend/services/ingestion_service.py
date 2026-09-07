@@ -37,6 +37,8 @@ class IngestionService:
 
         temp_path = None
         started = time.perf_counter()
+        docs = []
+        chunks = []
         self.metadata.update_file(file_id, status="processing", error_message=None)
         try:
             if local_path:
@@ -129,7 +131,6 @@ class IngestionService:
                 chunk_count=len(chunks),
                 error_message=None,
             )
-            release_documents(docs, chunks, texts, metadatas, vectors)
             logger.info("ingestion_total_seconds=%.3f file_id=%s", time.perf_counter() - started, file_id)
             return updated or record
         except AppError as exc:
@@ -141,5 +142,9 @@ class IngestionService:
             self.metadata.update_file(file_id, status="failed", error_message=message)
             raise ProcessingError(message) from exc
         finally:
+            # Batch buffers are deleted after every upsert. Only release the
+            # document/chunk collections here; the old code referenced the
+            # last batch variables after they had already been deleted.
+            release_documents(docs, chunks)
             if temp_path:
                 Path(temp_path).unlink(missing_ok=True)
