@@ -127,7 +127,9 @@ export function useDocAnalysis(type = 'all') {
 
   const handleAsk = async (question) => {
     const text = question.trim()
-    if (!text || !activeFileReady || thinking) return
+    // The selected file is the chat target. The API still validates that its
+    // ingestion is complete and returns a clear status error if necessary.
+    if (!text || !activeFile || thinking) return
 
     const history = messages.slice(-6).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',

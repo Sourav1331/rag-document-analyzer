@@ -93,7 +93,7 @@ export default function AnalyzerShell({
   }
 
   const onAsk = () => {
-    if (!question.trim() || !activeFileReady) return
+    if (!question.trim() || !activeFile) return
 
     handleAsk(question)
     setQuestion('')
@@ -148,7 +148,7 @@ export default function AnalyzerShell({
               <button
                 key={s}
                 onClick={() => handleAsk(s)}
-                disabled={!activeFileReady || thinking}
+                disabled={!activeFile || thinking}
                 className="w-full text-left text-xs text-slate-300 hover:text-white px-3 py-2 rounded-lg hover:bg-slate-800/70 transition disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 {s}
@@ -236,13 +236,13 @@ export default function AnalyzerShell({
                 }
               }}
               placeholder={
-                activeFileReady
+                activeFile
                   ? `Ask about your ${label.toLowerCase()}…`
                   : activeFile
                   ? `${activeFile.name} is ${activeFile.status}`
                   : `Upload a ${label.toLowerCase()} file to get started`
               }
-              disabled={!activeFileReady || thinking}
+              disabled={!activeFile || thinking}
               rows={1}
               className="flex-1 resize-none bg-slate-900/80 border border-slate-800/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-40 transition"
             />
@@ -251,7 +251,7 @@ export default function AnalyzerShell({
               onClick={onAsk}
               disabled={
                 !question.trim() ||
-                !activeFileReady ||
+                !activeFile ||
                 thinking
               }
               className="px-4 py-3 bg-gradient-to-r from-indigo-500 to-sky-500 hover:from-indigo-400 hover:to-sky-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-semibold transition shadow-lg shadow-indigo-500/25"
