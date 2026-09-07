@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
+import gc
 
 from services.document_service import load_documents, release_documents, split_documents
 from services.embedding_service import EmbeddingService
@@ -63,14 +64,64 @@ class IngestionService:
             )
 
             embed_started = time.perf_counter()
-            texts = [chunk.text for chunk in chunks]
-            metadatas = [chunk.metadata for chunk in chunks]
-            vectors = self.embeddings.embed_documents(texts)
-            logger.info("embedding_seconds=%.3f file_id=%s", time.perf_counter() - embed_started, file_id)
+            batch_size = 16
 
-            upsert_started = time.perf_counter()
-            self.vector_store.upsert_chunks(texts=texts, vectors=vectors, metadatas=metadatas)
-            logger.info("vector_upsert_seconds=%.3f file_id=%s", time.perf_counter() - upsert_started, file_id)
+            total_embedding_seconds = 0.0
+            total_upsert_seconds = 0.0
+
+            for start in range(0, len(chunks), batch_size):
+                batch = chunks[start:start + batch_size]
+
+                texts = [chunk.text for chunk in batch]
+                metadatas = [chunk.metadata for chunk in batch]
+
+                embed_started = time.perf_counter()
+
+                vectors = self.embeddings.embed_documents(texts)
+
+                embed_seconds = time.perf_counter() - embed_started
+                total_embedding_seconds += embed_seconds
+
+                logger.info(
+                    "embedding_batch_seconds=%.3f batch_start=%s batch_size=%s",
+                    embed_seconds,
+                    start,
+                    len(batch),
+                )
+
+                upsert_started = time.perf_counter()
+
+                self.vector_store.upsert_chunks(
+                    texts=texts,
+                    vectors=vectors,
+                    metadatas=metadatas,
+                )
+
+                upsert_seconds = time.perf_counter() - upsert_started
+                total_upsert_seconds += upsert_seconds
+
+                logger.info(
+                    "vector_upsert_batch_seconds=%.3f batch_start=%s batch_size=%s",
+                    upsert_seconds,
+                    start,
+                    len(batch),
+                )
+
+                del batch
+                del texts
+                del metadatas
+                del vectors
+                gc.collect()
+
+            logger.info(
+                "embedding_total_seconds=%.3f",
+                total_embedding_seconds,
+            )
+
+            logger.info(
+                "vector_upsert_total_seconds=%.3f",
+                total_upsert_seconds,
+            )
 
             updated = self.metadata.update_file(
                 file_id,
