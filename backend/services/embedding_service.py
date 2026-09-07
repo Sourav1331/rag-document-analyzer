@@ -5,9 +5,10 @@ from config import settings
 
 @lru_cache(maxsize=1)
 def get_embedding_model():
-    from sentence_transformers import SentenceTransformer
+    """Load the model lazily using FastEmbed's low-memory ONNX runtime."""
+    from fastembed import TextEmbedding
 
-    return SentenceTransformer(settings.embedding_model, device="cpu")
+    return TextEmbedding(model_name=settings.embedding_model)
 
 
 class EmbeddingService:
@@ -18,12 +19,7 @@ class EmbeddingService:
         if not texts:
             return []
         model = get_embedding_model()
-        vectors = model.encode(
-            texts,
-            batch_size=self.batch_size,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
+        vectors = model.embed(texts, batch_size=self.batch_size)
         return [vector.tolist() for vector in vectors]
 
     def embed_query(self, text: str) -> list[float]:

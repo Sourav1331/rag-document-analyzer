@@ -19,7 +19,6 @@ load_dotenv()
 
 from config import settings  # noqa: E402
 from services.document_service import validate_filename, validate_size  # noqa: E402
-from services.embedding_service import get_embedding_model  # noqa: E402
 from services.errors import AppError, FileTooLargeError, ProcessingError, to_http_error  # noqa: E402
 from services.factory import build_services  # noqa: E402
 from services.models import FileRecord  # noqa: E402
@@ -38,15 +37,6 @@ UPLOAD_EXTENSIONS = {
 }
 
 
-async def warmup() -> None:
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, get_embedding_model)
-        logger.info("Embeddings model loaded successfully.")
-    except Exception as exc:
-        logger.warning("Warmup failed: %s", exc)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     services = build_services()
@@ -55,7 +45,6 @@ async def lifespan(app: FastAPI):
         services["vector_store"].ensure_collection()
     except Exception:
         logger.exception("Vector collection setup failed.")
-    asyncio.create_task(warmup())
     yield
 
 

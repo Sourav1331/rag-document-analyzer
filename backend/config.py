@@ -21,7 +21,7 @@ class Settings:
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     embedding_model: str = os.getenv(
-        "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+        "EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"
     )
     embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 8)
     vector_size: int = _int_env("VECTOR_SIZE", 384)
@@ -29,7 +29,8 @@ class Settings:
     qdrant_url: str | None = os.getenv("QDRANT_URL")
     qdrant_api_key: str | None = os.getenv("QDRANT_API_KEY")
     qdrant_collection_name: str = os.getenv(
-        "QDRANT_COLLECTION_NAME", "docrag_chunks_v1"
+        # Keep vectors from the previous embedding model isolated.
+        "QDRANT_COLLECTION_NAME", "docrag_chunks_v2"
     )
     vector_upsert_batch_size: int = _int_env("VECTOR_UPSERT_BATCH_SIZE", 64)
     retrieval_k: int = _int_env("RETRIEVAL_K", 4)
