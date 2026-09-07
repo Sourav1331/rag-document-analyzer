@@ -4,7 +4,6 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -65,12 +64,6 @@ async def process_file_in_background(svc: dict, file_id: str) -> None:
         # IngestionService normally records failures itself; this also covers
         # queue/setup failures so the task never becomes an unhandled error.
         logger.exception("background_ingestion_failed file_id=%s", file_id)
-
-
-async def recover_stale_file(svc: dict, file_id: str) -> None:
-    """Retry records left in processing by an old worker or paused queue."""
-    try:
-        await process_file_in_background(svc, file_id)
     finally:
         _recovery_in_progress.discard(file_id)
 
@@ -180,6 +173,7 @@ async def _handle_upload(
         try:
             svc["storage"].upload(storage_path, data, upload.content_type)
             svc["metadata"].update_file(file_id, status="processing")
+            _recovery_in_progress.add(file_id)
             asyncio.create_task(process_file_in_background(svc, file_id))
             current = svc["metadata"].get_file(file_id) or record
             saved_files.append(
@@ -266,15 +260,9 @@ async def file_status(request: Request, file_id: str):
     if not record:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "File not found."})
     if record.status == "processing" and file_id not in _recovery_in_progress:
-        try:
-            updated_at = datetime.fromisoformat(record.updated_at.replace("Z", "+00:00"))
-            is_stale = datetime.now(timezone.utc) - updated_at > timedelta(minutes=2)
-        except (AttributeError, TypeError, ValueError):
-            is_stale = False
-        if is_stale:
-            _recovery_in_progress.add(file_id)
-            asyncio.create_task(recover_stale_file(svc, file_id))
-            logger.warning("stale_processing_file_requeued file_id=%s", file_id)
+        _recovery_in_progress.add(file_id)
+        asyncio.create_task(process_file_in_background(svc, file_id))
+        logger.warning("processing_file_requeued file_id=%s", file_id)
 
     return {
         "file_id": record.id,
