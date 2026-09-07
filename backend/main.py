@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -46,6 +45,23 @@ async def initialize_vector_store(vector_store) -> None:
         # The service should still start so Render can health-check it. The
         # dependency state is exposed through /ready and retried on ingestion.
         logger.exception("Vector collection setup failed during background initialization.")
+
+
+async def process_file_in_background(svc: dict, file_id: str) -> None:
+    """Run ingestion after the upload response has been sent to the client."""
+    try:
+        # Read from storage instead of the request's temporary file. The
+        # temporary upload file is cleaned up as soon as this handler returns.
+        await asyncio.to_thread(
+            svc["jobs"].enqueue_or_run,
+            file_id,
+            None,
+            "sync",
+        )
+    except Exception:
+        # IngestionService normally records failures itself; this also covers
+        # queue/setup failures so the task never becomes an unhandled error.
+        logger.exception("background_ingestion_failed file_id=%s", file_id)
 
 
 @asynccontextmanager
@@ -150,24 +166,15 @@ async def _handle_upload(
             status="uploaded",
         )
         svc["metadata"].create_file(record)
-        tmp_path = None
         try:
             svc["storage"].upload(storage_path, data, upload.content_type)
-            suffix = Path(safe_name).suffix
-            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-            os.close(fd)
-            Path(tmp_path).write_bytes(data)
             svc["metadata"].update_file(file_id, status="processing")
             if settings.ingestion_mode == "redis":
                 svc["jobs"].enqueue_or_run(file_id, None, "redis")
                 current = svc["metadata"].get_file(file_id) or record
             else:
-                current = await asyncio.to_thread(
-                svc["jobs"].enqueue_or_run,
-                file_id,
-                tmp_path,
-                "sync",
-            )
+                asyncio.create_task(process_file_in_background(svc, file_id))
+                current = svc["metadata"].get_file(file_id) or record
             saved_files.append(
                 {
                     "name": safe_name,
@@ -190,8 +197,6 @@ async def _handle_upload(
             svc["metadata"].update_file(file_id, status="failed", error_message="Upload failed.")
             raise ProcessingError("Upload failed.") from exc
         finally:
-            if tmp_path:
-                Path(tmp_path).unlink(missing_ok=True)
             data = b""
 
     logger.info("upload_total_seconds=%.3f files=%s", time.perf_counter() - started, len(saved_files))

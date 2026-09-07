@@ -89,7 +89,10 @@ export function useDocAnalysis(type = 'all') {
     files.forEach(f => form.append('files', f))
     form.append('session_id', sessionId)
     try {
-      const { data } = await axios.post(`${API_BASE_URL}${endpoint}`, form, { timeout: 120000 })
+      // Upload only persists the file; ingestion continues asynchronously and
+      // the status endpoint is polled above. Keep this request short so a
+      // slow PDF cannot hit Render's request timeout.
+      const { data } = await axios.post(`${API_BASE_URL}${endpoint}`, form, { timeout: 30000 })
       const newFiles = (data.files || []).map(file => ({
         id: file.file_id || file.id,
         name: file.name || file.filename || '',
