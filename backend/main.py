@@ -52,11 +52,19 @@ async def process_file_in_background(svc: dict, file_id: str) -> None:
     try:
         # Read from storage instead of the request's temporary file. The
         # temporary upload file is cleaned up as soon as this handler returns.
+        if settings.ingestion_mode == "redis":
+            try:
+                await asyncio.to_thread(
+                    svc["jobs"].enqueue_or_run, file_id, None, "redis"
+                )
+                return
+            except Exception:
+                logger.exception(
+                    "redis_unavailable_falling_back_to_sync file_id=%s", file_id
+                )
+
         await asyncio.to_thread(
-            svc["jobs"].enqueue_or_run,
-            file_id,
-            None,
-            "sync",
+            svc["jobs"].enqueue_or_run, file_id, None, "sync"
         )
     except Exception:
         # IngestionService normally records failures itself; this also covers
@@ -169,12 +177,8 @@ async def _handle_upload(
         try:
             svc["storage"].upload(storage_path, data, upload.content_type)
             svc["metadata"].update_file(file_id, status="processing")
-            if settings.ingestion_mode == "redis":
-                svc["jobs"].enqueue_or_run(file_id, None, "redis")
-                current = svc["metadata"].get_file(file_id) or record
-            else:
-                asyncio.create_task(process_file_in_background(svc, file_id))
-                current = svc["metadata"].get_file(file_id) or record
+            asyncio.create_task(process_file_in_background(svc, file_id))
+            current = svc["metadata"].get_file(file_id) or record
             saved_files.append(
                 {
                     "name": safe_name,
