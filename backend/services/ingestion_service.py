@@ -66,7 +66,9 @@ class IngestionService:
             )
 
             embed_started = time.perf_counter()
-            batch_size = 16
+            # Keep embedding and Qdrant calls coarse enough that network and
+            # per-call overhead do not dominate ingestion time.
+            batch_size = settings.vector_upsert_batch_size
 
             total_embedding_seconds = 0.0
             total_upsert_seconds = 0.0

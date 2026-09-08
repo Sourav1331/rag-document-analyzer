@@ -53,17 +53,22 @@ async def process_file_in_background(svc: dict, file_id: str) -> None:
     try:
         # Read from storage instead of the request's temporary file. The
         # temporary upload file is cleaned up as soon as this handler returns.
-        # Redis is intentionally not used here: a paused/missing worker would
-        # leave the document permanently stuck in "processing". A separate
-        # worker can still be introduced later, but the web deployment must
-        # remain functional without Redis.
         await asyncio.to_thread(
-            svc["jobs"].enqueue_or_run, file_id, None, "sync"
+            svc["jobs"].enqueue_or_run, file_id, None, settings.ingestion_mode
         )
     except Exception:
         # IngestionService normally records failures itself; this also covers
         # queue/setup failures so the task never becomes an unhandled error.
         logger.exception("background_ingestion_failed file_id=%s", file_id)
+        try:
+            await asyncio.to_thread(
+                svc["metadata"].update_file,
+                file_id,
+                status="failed",
+                error_message="Could not queue document for processing.",
+            )
+        except Exception:
+            logger.exception("background_queue_failure_status_update_failed file_id=%s", file_id)
     finally:
         _recovery_in_progress.discard(file_id)
 
@@ -259,7 +264,19 @@ async def file_status(request: Request, file_id: str):
     record = svc["metadata"].get_file(file_id)
     if not record:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "File not found."})
-    if record.status == "processing" and file_id not in _recovery_in_progress:
+    should_recover = (
+        record.status == "processing"
+        and file_id not in _recovery_in_progress
+    )
+    if should_recover and settings.ingestion_mode == "redis":
+        try:
+            should_recover = not await asyncio.to_thread(
+                svc["jobs"].is_pending, file_id
+            )
+        except Exception:
+            logger.exception("queue_status_check_failed file_id=%s", file_id)
+            should_recover = False
+    if should_recover:
         _recovery_in_progress.add(file_id)
         asyncio.create_task(process_file_in_background(svc, file_id))
         logger.warning("processing_file_requeued file_id=%s", file_id)

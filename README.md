@@ -193,7 +193,7 @@ SUPABASE_STORAGE_BUCKET=documents
 REDIS_URL=redis://localhost:6379/0
 INGESTION_MODE=sync
 EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-EMBEDDING_BATCH_SIZE=8
+EMBEDDING_BATCH_SIZE=32
 VECTOR_SIZE=384
 MAX_FILE_SIZE_MB=10
 MAX_TEXT_CHARACTERS=1500000
@@ -202,7 +202,7 @@ CHUNK_SIZE=800
 CHUNK_OVERLAP=120
 RETRIEVAL_K=4
 RETRIEVAL_SCORE_THRESHOLD=
-VECTOR_UPSERT_BATCH_SIZE=64
+VECTOR_UPSERT_BATCH_SIZE=256
 SESSION_EXPIRY_HOURS=72
 LOG_LEVEL=INFO
 ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
@@ -287,13 +287,19 @@ FastAPI web service:
 uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
 ```
 
-Optional ingestion worker when `INGESTION_MODE=redis`:
+For a single Render Web Service without a Background Worker, use:
+
+```env
+INGESTION_MODE=sync
+```
+
+The web service processes the document in an in-process background task. This is suitable for testing and small documents. For reliable long-running production processing, use `INGESTION_MODE=redis` with a separate Background Worker. The worker command is:
 
 ```bash
 rq worker ingestion --url $REDIS_URL
 ```
 
-Use a Redis instance for the worker queue. Keep one Uvicorn worker initially to avoid loading multiple embedding-model copies.
+Use a Redis instance for the worker queue. Keep one Uvicorn worker initially to avoid loading multiple embedding-model copies. The worker preloads the FastEmbed model and uses stable per-file RQ job IDs to avoid duplicate processing.
 
 ## Vercel Deployment
 
