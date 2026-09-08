@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 import gc
 
+from config import settings
 from services.document_service import load_documents, release_documents, split_documents
 from services.embedding_service import EmbeddingService
 from services.errors import AppError, ProcessingError
