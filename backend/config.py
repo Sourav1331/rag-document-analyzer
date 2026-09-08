@@ -23,9 +23,9 @@ class Settings:
     embedding_model: str = os.getenv(
         "EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"
     )
-    # Larger batches substantially reduce Python/ONNX overhead on Render CPU.
-    # Override these for a smaller instance if memory becomes an issue.
-    embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 32)
+    # Safe defaults for Render's 512 MB free instance. Increase these only
+    # after moving to a larger instance with more memory.
+    embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 8)
     vector_size: int = _int_env("VECTOR_SIZE", 384)
 
     qdrant_url: str | None = os.getenv("QDRANT_URL")
@@ -34,7 +34,7 @@ class Settings:
         # Keep vectors from the previous embedding model isolated.
         "QDRANT_COLLECTION_NAME", "docrag_chunks_v2"
     )
-    vector_upsert_batch_size: int = _int_env("VECTOR_UPSERT_BATCH_SIZE", 256)
+    vector_upsert_batch_size: int = _int_env("VECTOR_UPSERT_BATCH_SIZE", 64)
     retrieval_k: int = _int_env("RETRIEVAL_K", 4)
     retrieval_score_threshold: float | None = _float_env(
         "RETRIEVAL_SCORE_THRESHOLD", None

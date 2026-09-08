@@ -26,7 +26,9 @@ export default function FileList({ files, activeFileId, onRemove, onSelect }) {
         const ext = name.split('.').pop().toLowerCase()
         const fileId = typeof file === 'object' ? file?.id : null
         const isActive = activeFileId && fileId === activeFileId
-        const status = typeof file === 'object' ? file?.status || 'ready' : 'ready'
+        // Never display a missing status as ready. The chat input only becomes
+        // usable when the actual file record has completed ingestion.
+        const status = typeof file === 'object' ? file?.status || 'processing' : 'ready'
         const isReady = status.toLowerCase() === 'ready'
         const statusLabel = isActive && isReady ? 'Active' : status.charAt(0).toUpperCase() + status.slice(1)
 
