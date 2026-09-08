@@ -82,7 +82,21 @@ class IngestionService:
 
                 embed_started = time.perf_counter()
 
-                vectors = self.embeddings.embed_documents(texts)
+                logger.info(
+                    "embedding_batch_started batch_start=%s batch_size=%s total_chunks=%s",
+                    start,
+                    len(texts),
+                    len(chunks),
+                )
+                try:
+                    vectors = self.embeddings.embed_documents(texts)
+                except Exception:
+                    logger.exception(
+                        "embedding_batch_failed batch_start=%s batch_size=%s",
+                        start,
+                        len(texts),
+                    )
+                    raise
 
                 embed_seconds = time.perf_counter() - embed_started
                 total_embedding_seconds += embed_seconds
