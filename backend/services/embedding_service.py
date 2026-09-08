@@ -50,10 +50,13 @@ class EmbeddingService:
                 len(batch),
             )
             try:
-                batch_vectors = model.embed(
+                # FastEmbed returns a lazy generator. Materialize it inside
+                # the timed/guarded block so the logs measure the actual ONNX
+                # work rather than only generator creation.
+                batch_vectors = list(model.embed(
                     batch,
                     batch_size=self.batch_size,
-                )
+                ))
                 logger.info(
                     "embedding_model_batch_completed batch_start=%s batch_size=%s duration_seconds=%.3f",
                     start,
@@ -69,10 +72,7 @@ class EmbeddingService:
                 )
                 raise
 
-            vectors.extend(
-                vector.tolist()
-                for vector in batch_vectors
-            )
+            vectors.extend(vector.tolist() for vector in batch_vectors)
 
         logger.info("embedding_documents_completed texts=%s", len(texts))
         return vectors
