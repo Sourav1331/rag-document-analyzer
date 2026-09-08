@@ -130,6 +130,16 @@ export default function AnalyzerShell({
             </p>
           )}
 
+          <details className="mt-3 rounded-xl border border-sky-500/15 bg-sky-500/5 text-xs text-slate-400">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sky-200/90 hover:text-sky-100">
+              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-sky-300/50 text-[10px] font-bold">i</span>
+              <span>Processing may take a little time</span>
+            </summary>
+            <p className="px-3 pb-3 leading-relaxed">
+              This RAG system first extracts the document, splits it into searchable chunks, generates an embedding for each chunk and stores those vectors before it can answer questions with relevant citations. These steps are CPU-intensive and Render's free shared CPU can make larger files and AI responses take several minutes. You can ask questions once the file shows Active.
+            </p>
+          </details>
+
           <FileList
             files={uploadedFiles}
             activeFileId={activeFileId}
