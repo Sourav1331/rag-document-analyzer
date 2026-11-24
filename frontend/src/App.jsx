@@ -4,7 +4,7 @@ import LandingPage from './pages/LandingPage'
 import AnalyzePage from './pages/AnalyzePage'
 
 export default function App() {
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark')
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light')
 
   useEffect(() => {
     const root = document.documentElement

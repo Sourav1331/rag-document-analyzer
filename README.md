@@ -1,6 +1,6 @@
 # DocRAG Studio
 
-An AI-powered document analysis tool built with React, FastAPI, Qdrant, Supabase, LangChain, and Groq. Upload documents, wait for processing, then ask questions grounded in the active file. Each analyzer tab keeps isolated state, and retrieval is filtered by session, analyzer type, and file ID.
+An AI-powered document analysis tool built with React, FastAPI, SQLite, LangChain, and Groq. Upload documents, wait for processing, then ask questions grounded in the active file. Each analyzer tab keeps isolated state, and retrieval is filtered by session, analyzer type, and file ID.
 
 ---
 
@@ -12,7 +12,7 @@ An AI-powered document analysis tool built with React, FastAPI, Qdrant, Supabase
 - Per-file retrieval so the newest upload becomes active and questions are scoped to that file
 - File removal with an `x` button that deletes the stored chunks as well
 - File type validation in both frontend and backend
-- RAG pipeline with persistent Qdrant vectors and Supabase file metadata
+- RAG pipeline with on-disk SQLite embeddings and file metadata
 - Groq inference with the current `openai/gpt-oss-20b` production model
 - Structured responses with clean rendering for headings, bullets, and links
 - Suggested questions per file type
@@ -28,7 +28,7 @@ An AI-powered document analysis tool built with React, FastAPI, Qdrant, Supabase
 |-----------|---------------------------------------------|
 | Frontend  | React 18, Vite, Tailwind CSS, React Router   |
 | Backend   | FastAPI, Python 3.10+                        |
-| RAG       | LangChain, Qdrant Cloud, Supabase, `all-MiniLM-L6-v2` |
+| RAG       | LangChain, SQLite, FastEmbed `BAAI/bge-small-en-v1.5` |
 | LLM       | Groq API (`openai/gpt-oss-20b`)               |
 | Parsing   | PyPDF, Pandas, openpyxl, Unstructured        |
 
@@ -70,7 +70,7 @@ rag-document-analyzer/
 |-- backend/
 |   |-- main.py                      # FastAPI routes
 |   |-- services/                    # Embeddings, metadata, storage, vectors, ingestion, RAG
-|   |-- migrations/                  # Supabase SQL schema
+|   |-- migrations/                  # Historical cloud schema
 |   |-- worker.py                    # RQ ingestion job target
 |   |-- requirements.txt
 |   |-- Dockerfile
@@ -104,12 +104,10 @@ pip install -r requirements.txt
 
 # Set up environment variables
 cp .env.example .env
-# Open .env and add Groq, Qdrant, and Supabase configuration
+# Set GROQ_API_KEY in .env
 ```
 
-Supabase and Qdrant are used when their URL and API key variables are present. If
-they are omitted for local development, the backend falls back to in-memory
-metadata/vectors and the `backend/uploads/` directory.
+The backend stores original documents, a SQLite database (`docrag.sqlite3`), and the cached embedding model under `backend/uploads/`. Set `LOCAL_STORAGE_DIR` to use another directory. The first upload downloads the embedding model. Subsequent uploads and searches use the local CPU. Groq generates answers from the selected passages.
 
 Start the backend:
 
@@ -184,17 +182,11 @@ Create `backend/.env`:
 ```env
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-20b
-QDRANT_URL=https://your-cluster.qdrant.io
-QDRANT_API_KEY=your_qdrant_api_key
-QDRANT_COLLECTION_NAME=docrag_chunks_v2
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-SUPABASE_STORAGE_BUCKET=documents
+LOCAL_STORAGE_DIR=uploads
 REDIS_URL=redis://localhost:6379/0
 INGESTION_MODE=sync
 EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 EMBEDDING_BATCH_SIZE=8
-VECTOR_SIZE=384
 MAX_FILE_SIZE_MB=10
 MAX_TEXT_CHARACTERS=1500000
 MAX_CHUNKS_PER_FILE=1000
@@ -220,7 +212,7 @@ For the frontend, `frontend/.env.local` can define the backend URL:
 VITE_API_URL=http://localhost:8000
 ```
 
-When deploying the frontend separately, set `VITE_API_URL` to the public backend URL.
+Docker serves the API at `/api` through Nginx. When deploying the frontend separately, set `VITE_API_URL` to the active public backend URL at build time and add the frontend origin to `ALLOWED_ORIGINS` on the backend.
 
 ---
 
@@ -256,30 +248,19 @@ When deploying the frontend separately, set `VITE_API_URL` to the public backend
 ## How It Works
 
 1. Upload validates extension, size, and filename.
-2. File metadata is stored in Supabase with status `uploaded` then `processing` (or in-memory locally).
-3. The original file is stored in Supabase Storage or `backend/uploads/` locally.
-4. Ingestion extracts text, rejects empty or oversized documents, chunks text, embeds in batches, and upserts vectors into one Qdrant collection.
+2. SQLite records the upload and its processing status.
+3. The original file is saved under `LOCAL_STORAGE_DIR`.
+4. Ingestion extracts text, rejects empty or oversized documents, chunks text, embeds in batches, and writes normalized embeddings and chunk text to SQLite.
 5. Each vector carries `session_id`, `analyzer_type`, `file_id`, `filename`, `chunk_id`, `chunk_index`, source metadata, and upload timestamps.
 6. The frontend keeps file metadata only in React memory, polls `/files/{file_id}/status`, and disables questions until the active file is `ready`.
-7. `/ask-stream` embeds only the query, searches Qdrant with strict filters, builds a grounded prompt, and streams Groq tokens.
+7. `/ask-stream` embeds only the query, ranks the selected file?s chunks by cosine similarity, builds a grounded prompt, and streams Groq tokens.
 8. Delete removes only points matching the selected session/analyzer/file filters, then marks metadata deleted. The UI removes the file immediately while remote cleanup runs.
 
-The legacy in-memory Chroma implementation has been removed from request handling. Embeddings use FastEmbed `BAAI/bge-small-en-v1.5` through the lightweight ONNX CPU runtime. Existing Qdrant vectors created with the old SentenceTransformers model cannot be reused safely; the default collection is now `docrag_chunks_v2`, so re-upload documents after deploying this version.
-
-## Supabase Setup
-
-1. Create a Supabase project.
-2. Run `backend/migrations/001_document_files.sql` in the SQL editor.
-3. Create a private Storage bucket named by `SUPABASE_STORAGE_BUCKET`, default `documents`.
-4. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` only on the backend and worker services. Never expose the service-role key to Vercel.
-
-## Qdrant Setup
-
-1. Create a Qdrant Cloud cluster and API key.
-2. Set `QDRANT_URL`, `QDRANT_API_KEY`, and `QDRANT_COLLECTION_NAME`.
-3. The backend creates the collection if missing with vector size `384` and cosine distance. The new default collection is `docrag_chunks_v2`; re-upload documents after switching embedding models.
+Re-upload documents previously stored in the expired cloud services. Existing cloud credentials in the environment are ignored. A backend restart preserves the local database and uploaded files. The browser still starts a fresh session on reload.
 
 ## Render Deployment
+
+Mount a persistent disk on the backend and set `LOCAL_STORAGE_DIR` to a writable directory on that disk. Use one instance for both the API and in-process ingestion. Ephemeral storage loses documents on replacement or redeploy.
 
 FastAPI web service:
 
@@ -293,13 +274,7 @@ For a single Render Web Service without a Background Worker, use:
 INGESTION_MODE=sync
 ```
 
-The web service processes the document in an in-process background task. This is suitable for testing and small documents. For reliable long-running production processing, use `INGESTION_MODE=redis` with a separate Background Worker. The worker command is:
-
-```bash
-rq worker ingestion --url $REDIS_URL
-```
-
-Use a Redis instance for the worker queue. Keep one Uvicorn worker initially to avoid loading multiple embedding-model copies. The worker preloads the FastEmbed model and uses stable per-file RQ job IDs to avoid duplicate processing.
+The default in-process mode indexes uploads in the web service. For Docker Compose with a separate worker on the same host, set `INGESTION_MODE=redis` and start with `docker compose --profile worker up --build`. Both processes must mount the same data directory for the originals and SQLite database.
 
 ## Vercel Deployment
 
@@ -338,15 +313,15 @@ Edit `backend/eval_cases.json` with real uploaded `file_id` and `session_id` val
 
 ## Production Checklist
 
-- `/ready` returns success with Supabase, Qdrant, storage, and Groq configured.
+- `/ready` returns success with local storage, SQLite, and a configured Groq key.
 - Upload returns a server-generated `file_id` and status.
 - File status changes to `ready` with nonzero `chunk_count`.
 - Ask is blocked while the file is processing or failed.
 - `/ask-stream` logs query embedding, vector search, time to first token, and total LLM time.
-- Qdrant payload filters include at least `session_id`, `analyzer_type`, and `file_id`.
+- Retrieval filters include at least `session_id`, `analyzer_type`, and `file_id`.
 - Removing one file does not remove another file in the same session.
 - Render web command uses one Uvicorn worker.
-- Worker service is configured if `INGESTION_MODE=redis`.
+- A worker configured with `INGESTION_MODE=redis` shares the backend data volume.
 - Vercel has only `VITE_API_URL`; no backend service keys.
 
 ---

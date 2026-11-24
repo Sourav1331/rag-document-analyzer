@@ -3,7 +3,7 @@ import axios from 'axios'
 import { v4 as uuidv4 } from 'uuid'
 
 const DEFAULT_API_BASE_URL = import.meta.env.PROD
-  ? 'https://rag-document-analyzer.onrender.com'
+  ? '/api'
   : 'http://localhost:8000'
 const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '')
 
@@ -47,6 +47,14 @@ export function useDocAnalysis(type = 'all') {
   const activeFileReady = !!activeFile && activeFile.status === 'ready'
 
   useEffect(() => {
+    const controller = new AbortController()
+    axios.get(`${API_BASE_URL}/ready`, { signal: controller.signal, timeout: 30000 })
+      .then(() => setBackendStatus('online'))
+      .catch(() => { if (!controller.signal.aborted) setBackendStatus('offline') })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
     const processing = uploadedFiles.filter(file => PROCESSING_STATUSES.includes(file.status))
     if (!processing.length) return
 
@@ -54,12 +62,13 @@ export function useDocAnalysis(type = 'all') {
       await Promise.all(processing.map(async file => {
         try {
           const { data } = await axios.get(`${API_BASE_URL}/files/${file.id}/status`)
+          setBackendStatus('online')
+          if (file.status === data.status && file.chunk_count === data.chunk_count && file.error === data.error) return
           setUploadedFiles(prev => prev.map(item =>
             item.id === file.id
               ? { ...item, status: data.status, chunk_count: data.chunk_count, error: data.error }
               : item
           ))
-          setBackendStatus('online')
         } catch (_) {
           setBackendStatus('offline')
         }
@@ -159,15 +168,18 @@ export function useDocAnalysis(type = 'all') {
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let sources = []
+      let pending = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n').filter(line => line.startsWith('data: '))
+        pending += decoder.decode(value, { stream: true })
+        const lines = pending.split('\n')
+        pending = lines.pop()
 
         for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
           try {
             const data = JSON.parse(line.slice(6))
             if (data.type === 'sources') {

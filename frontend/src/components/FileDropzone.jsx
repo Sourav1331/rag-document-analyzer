@@ -1,71 +1,27 @@
 import { useRef, useState } from 'react'
+import { Icon } from './Icon'
 
-export default function FileDropzone({ acceptedTypes, label, icon, onFile, loading }) {
-  const inputRef = useRef()
+export default function FileDropzone({ acceptedTypes, label, onFile, loading }) {
+  const input = useRef(null)
   const [dragging, setDragging] = useState(false)
-  const [error, setError] = useState(null)
-
-  const validate = fileList => {
-    const files = Array.from(fileList)
-    const invalid = files.filter(file => {
-      const ext = '.' + file.name.split('.').pop().toLowerCase()
-      return !acceptedTypes.includes(ext)
-    })
-
-    if (invalid.length) {
-      setError(`Invalid file type. Please upload only ${acceptedTypes.join(', ')} files.`)
+  const [error, setError] = useState('')
+  function accept(list) {
+    const files = Array.from(list)
+    if (loading || !files.length) return
+    if (files.some(f => !acceptedTypes.includes('.' + f.name.split('.').pop().toLowerCase()))) {
+      setError('Choose a file ending in ' + acceptedTypes.join(', ') + '.')
       return
     }
-
-    setError(null)
+    setError('')
     onFile(files)
   }
-
-  return (
-    <div>
-      <div
-        onClick={() => inputRef.current.click()}
-        onDragOver={e => {
-          e.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={e => {
-          e.preventDefault()
-          setDragging(false)
-          validate(e.dataTransfer.files)
-        }}
-        className={`border border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all ${
-          dragging
-            ? 'border-indigo-400/80 bg-indigo-500/10 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
-            : error
-            ? 'border-rose-500/60 bg-rose-500/5'
-            : 'border-slate-700/70 bg-slate-900/40 hover:border-slate-500/80 hover:bg-slate-900/60'
-        }`}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={acceptedTypes.join(',')}
-          className="hidden"
-          onChange={e => validate(e.target.files)}
-        />
-        <div className="text-2xl mb-1.5">{icon}</div>
-        {loading ? (
-          <p className="text-sm text-indigo-300 animate-pulse">Processing files...</p>
-        ) : (
-          <>
-            <p className="text-sm text-slate-200 font-medium leading-snug">Drop {label} file or click to upload</p>
-            <p className="text-[11px] text-slate-500 mt-1">{acceptedTypes.join(' · ').toUpperCase()}</p>
-          </>
-        )}
-      </div>
-      {error && (
-        <div className="mt-2 flex items-center gap-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">
-          <span>⚠️</span> {error}
-        </div>
-      )}
-    </div>
-  )
+  return <div><input ref={input} type="file" multiple hidden aria-label={'Upload ' + label + ' files'} accept={acceptedTypes.join(',')}
+    onChange={e => { accept(e.target.files); e.target.value = '' }} />
+    <button className={'dropzone' + (dragging ? ' dragging' : '')} type="button" disabled={loading} onClick={() => input.current.click()}
+      onDragOver={e => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); accept(e.dataTransfer.files) }}>
+      <span className="upload-icon"><Icon name="upload" size={24} /></span><strong>{loading ? 'Uploading…' : 'Drop your files here'}</strong>
+      <span>{loading ? 'Saving your source files' : 'or browse files'}</span><small>{acceptedTypes.join(' · ')}</small>
+    </button>
+    {error && <p className="field-error" role="alert">{error}</p>}
+  </div>
 }

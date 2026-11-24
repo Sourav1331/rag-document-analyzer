@@ -2,6 +2,8 @@ import { useState } from 'react'
 import FileDropzone from './FileDropzone'
 import FileList from './FileList'
 import ChatWindow from './ChatWindow'
+import { Icon } from './Icon'
+import { groupSourceFiles, passageLocation } from './sourceReferences'
 import { useDocAnalysis } from '../hooks/useDocAnalysis'
 
 const SUGGESTIONS = {
@@ -30,259 +32,67 @@ const SUGGESTIONS = {
     'What are the most important takeaways?'
   ],
   all: [
-    'Summarize all uploaded documents.',
+    'Summarize the selected document.',
     'What are the key insights and takeaways?',
     'List any risks, anomalies, or inconsistencies.',
     'Provide a concise executive summary.'
   ]
 }
 
-export default function AnalyzerShell({
-  type,
-  acceptedTypes,
-  label,
-  icon
-}) {
+
+export default function AnalyzerShell({ type, acceptedTypes, label }) {
+  const [showSuggestions, setShowSuggestions] = useState(() => window.matchMedia('(min-width: 681px)').matches)
   const [question, setQuestion] = useState('')
-
-  const {
-    uploadedFiles,
-    uploading,
-    messages,
-    thinking,
-    statusMsg,
-    backendStatus,
-    activeFileId,
-    activeFile,
-    activeFileReady,
-    handleUpload,
-    handleAsk,
-    removeUploadedFile,
-    clearChat,
-    selectFile,
-    cancelAsk
-  } = useDocAnalysis(type)
-
+  const { uploadedFiles, uploading, messages, thinking, statusMsg, backendStatus,
+    activeFileId, activeFile, activeFileReady, handleUpload, handleAsk,
+    removeUploadedFile, clearChat, selectFile, cancelAsk } = useDocAnalysis(type)
   const suggestions = SUGGESTIONS[type] || SUGGESTIONS.all
 
-  const exportChat = () => {
-    if (!messages.length) return
-
-    const content = messages
-      .map(
-        msg =>
-          `[${msg.role === 'user' ? 'You' : 'AI'}]\n${msg.content || msg.text || ''}`
+  function exportChat() {
+    const content = messages.map(m => {
+      const sources = groupSourceFiles(m.sources).map(file =>
+        file.name + ' (' + file.passages.map(passageLocation).join(', ') + ')'
       )
-      .join('\n\n--------------------------------\n\n')
-
-    const blob = new Blob([content], {
-      type: 'text/plain;charset=utf-8'
-    })
-
-    const url = URL.createObjectURL(blob)
-
+      return (m.role === 'user' ? 'You' : 'DocRAG') + '\n' + m.text +
+        (sources.length ? '\nSources: ' + sources.join('\n') : '')
+    }).join('\n\n')
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = `chat-export-${Date.now()}.txt`
-
-    document.body.appendChild(link)
+    link.download = 'docrag-chat-' + Date.now() + '.txt'
     link.click()
-    document.body.removeChild(link)
-
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  const onAsk = () => {
-    if (!question.trim() || !activeFileReady) return
-
-    handleAsk(question)
-    setQuestion('')
+  function send() {
+    if (activeFileReady && !thinking && question.trim()) {
+      handleAsk(question)
+      setQuestion('')
+    }
   }
 
-  return (
-    <div className="flex flex-col lg:flex-row gap-6 h-full min-h-0">
-      {/* Sidebar */}
-      <aside className="w-full lg:w-72 shrink-0 flex flex-col gap-4 bg-slate-900/60 border border-slate-800/70 rounded-2xl p-5 shadow-xl shadow-slate-950/40 lg:h-full lg:overflow-y-auto">
-        <div>
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.2em] mb-3">
-            Upload {label}
-          </p>
-
-          <FileDropzone
-            acceptedTypes={acceptedTypes}
-            label={label}
-            icon={icon}
-            onFile={handleUpload}
-            loading={uploading}
-          />
-
-          {statusMsg && (
-            <p
-              className={`text-xs mt-2 ${
-                statusMsg.toLowerCase().includes('wrong') ||
-                statusMsg.toLowerCase().includes('fail') ||
-                statusMsg.toLowerCase().includes('error')
-                  ? 'text-rose-400'
-                  : 'text-indigo-300'
-              }`}
-            >
-              {statusMsg}
-            </p>
-          )}
-
-          <details className="mt-3 rounded-xl border border-sky-500/15 bg-sky-500/5 text-xs text-slate-400">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sky-200/90 hover:text-sky-100">
-              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-sky-300/50 text-[10px] font-bold">i</span>
-              <span>Processing may take a little time</span>
-            </summary>
-            <p className="px-3 pb-3 leading-relaxed">
-              This RAG system first extracts the document, splits it into searchable chunks, generates an embedding for each chunk and stores those vectors before it can answer questions with relevant citations. These steps are CPU-intensive and Render's free shared CPU can make larger files and AI responses take several minutes. You can ask questions once the file shows Active.
-            </p>
-          </details>
-
-          <FileList
-            files={uploadedFiles}
-            activeFileId={activeFileId}
-            onRemove={removeUploadedFile}
-            onSelect={selectFile}
-          />
-        </div>
-
-        <div className="mt-auto">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.2em] mb-2">
-            Suggested questions
-          </p>
-
-          <div className="space-y-1.5">
-            {suggestions.map(s => (
-              <button
-                key={s}
-                onClick={() => handleAsk(s)}
-                disabled={!activeFileReady || thinking}
-                className="w-full text-left text-xs text-slate-300 hover:text-white px-3 py-2 rounded-lg hover:bg-slate-800/70 transition disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={clearChat}
-            className="flex-1 text-xs border border-slate-700/70 text-slate-400 hover:text-white hover:border-slate-500/80 px-3 py-2 rounded-xl transition"
-          >
-            Clear Chat
-          </button>
-
-          <button
-            onClick={exportChat}
-            disabled={!messages.length}
-            className="flex-1 text-xs border border-slate-700/70 text-slate-400 hover:text-white hover:border-slate-500/80 px-3 py-2 rounded-xl transition disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Export Chat
-          </button>
-        </div>
-      </aside>
-
-      {/* Chat Area */}
-      <main className="flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-950/60 border border-slate-800/70 rounded-2xl shadow-xl shadow-slate-950/40">
-        <div className="border-b border-slate-800/70 p-4 bg-slate-950/70 flex items-center gap-3">
-          <span className="text-xl">{icon}</span>
-
-          <div>
-            <h3 className="text-sm font-semibold text-white">
-              {label} Analyzer
-            </h3>
-
-            <p className="text-xs text-slate-400">
-              {uploadedFiles.length} file
-              {uploadedFiles.length !== 1 ? 's' : ''} loaded ·{' '}
-              {messages.length} messages
-            </p>
-          </div>
-
-          <div
-            className={`ml-auto flex items-center gap-2 text-xs px-2.5 py-1 rounded-full border
-            ${
-              backendStatus === 'online'
-                ? 'text-emerald-300/90 bg-emerald-500/10 border-emerald-500/20'
-                : backendStatus === 'offline'
-                ? 'text-rose-300/90 bg-rose-500/10 border-rose-500/20'
-                : 'text-slate-300/90 bg-slate-500/10 border-slate-500/20'
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                backendStatus === 'online'
-                  ? 'bg-emerald-400'
-                  : backendStatus === 'offline'
-                  ? 'bg-rose-400'
-                  : 'bg-slate-400'
-              }`}
-            />
-            {backendStatus === 'online'
-              ? 'Online'
-              : backendStatus === 'offline'
-              ? 'Offline'
-              : 'Checking'}
-          </div>
-        </div>
-
-        <ChatWindow
-          messages={messages}
-          thinking={thinking}
-        />
-
-        <div className="border-t border-slate-800/70 p-4 bg-slate-950/70">
-          <div className="flex gap-3 items-end">
-            <textarea
-              value={question}
-              onChange={e => setQuestion(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  onAsk()
-                }
-              }}
-              placeholder={
-                activeFileReady
-                  ? `Ask about your ${label.toLowerCase()}…`
-                  : activeFile
-                  ? `${activeFile.name} is ${activeFile.status}`
-                  : `Upload a ${label.toLowerCase()} file to get started`
-              }
-              disabled={!activeFileReady || thinking}
-              rows={1}
-              className="flex-1 resize-none bg-slate-900/80 border border-slate-800/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-40 transition"
-            />
-
-            <button
-              onClick={onAsk}
-              disabled={
-                !question.trim() ||
-                !activeFileReady ||
-                thinking
-              }
-              className="px-4 py-3 bg-gradient-to-r from-indigo-500 to-sky-500 hover:from-indigo-400 hover:to-sky-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-semibold transition shadow-lg shadow-indigo-500/25"
-            >
-              {thinking ? 'Asking' : 'Ask'}
-            </button>
-            {thinking && (
-              <button
-                onClick={cancelAsk}
-                className="px-3 py-3 border border-slate-700/70 text-slate-300 rounded-xl text-sm transition hover:text-white hover:border-slate-500/80"
-              >
-                Stop
-              </button>
-            )}
-          </div>
-
-          <p className="text-center text-xs text-slate-500 mt-2">
-            Enter to send · Shift+Enter for new line
-          </p>
-        </div>
-      </main>
-    </div>
-  )
+  return <div className="work-grid">
+    <aside className="source-panel">
+      <div className="panel-heading"><span className="section-icon"><Icon name="folder" /></span><h2>Sources</h2><span className="file-count">{uploadedFiles.length}</span></div>
+      <FileDropzone acceptedTypes={acceptedTypes} label={label} onFile={handleUpload} loading={uploading} />
+      {statusMsg && <p className="status-note" role="status">{statusMsg}</p>}
+      <FileList files={uploadedFiles} activeFileId={activeFileId} onRemove={removeUploadedFile} onSelect={id => { if (id !== activeFileId) { selectFile(id); setQuestion('') } }} />
+      {activeFileReady && <details className="suggestions" open={showSuggestions} onToggle={e => setShowSuggestions(e.currentTarget.open)}><summary>Suggested questions</summary>{suggestions.map(s => <button disabled={thinking} key={s} onClick={() => handleAsk(s)}>{s}</button>)}</details>}
+      <div className="source-foot"><Icon name="info" size={16} /><p>Each conversation uses the selected file. Larger files take longer to index.</p></div>
+    </aside>
+    <section className="chat-panel" aria-label="Document conversation">
+      <div className="chat-heading"><div className="chat-title"><h2>Conversation</h2><p title={activeFile?.name}>{activeFile?.name || 'No source selected'}</p></div>
+        <span className={'connection ' + backendStatus}><i />{backendStatus === 'online' ? 'Online' : backendStatus === 'offline' ? 'Offline' : 'Checking'}</span>
+        <div className="chat-tools"><button className="icon-button" disabled={!messages.length || thinking} onClick={exportChat} aria-label="Export chat" title="Export chat"><Icon name="download" size={17} /></button>
+          <button className="icon-button" disabled={!messages.length || thinking} onClick={clearChat} aria-label="Clear chat" title="Clear chat"><Icon name="clear" size={17} /></button></div>
+      </div>
+      <ChatWindow messages={messages} activeFile={activeFile} ready={activeFileReady} />
+      <form className="composer" onSubmit={e => { e.preventDefault(); send() }}>
+        <div className="compose-box"><textarea aria-label="Question about the selected document" placeholder={activeFileReady ? 'Ask about this document…' : 'Add a ready source to ask a question…'} rows={2} disabled={!activeFileReady || thinking} value={question}
+          onChange={e => setQuestion(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }} />
+          {thinking ? <button type="button" className="send" onClick={cancelAsk} aria-label="Stop answer"><Icon name="stop" size={18} /></button> : <button className="send" type="submit" disabled={!activeFileReady || !question.trim()} aria-label="Send question"><Icon name="send" size={18} /></button>}</div>
+        <p>Enter to send <span>·</span> Shift + Enter for a new line</p>
+      </form>
+    </section>
+  </div>
 }
