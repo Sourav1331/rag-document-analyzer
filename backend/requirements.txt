@@ -11,8 +11,7 @@ langchain-groq
 
 # Lightweight ONNX CPU embeddings; avoids loading the PyTorch runtime on Render.
 fastembed
-qdrant-client
-supabase
+numpy
 redis
 rq
 

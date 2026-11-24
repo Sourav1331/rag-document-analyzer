@@ -3,7 +3,6 @@ import uuid
 from threading import RLock
 from typing import Any, Iterable
 
-from config import settings
 from services.models import SearchResult
 
 
@@ -29,9 +28,6 @@ def strict_filter(
 
 
 class VectorStoreService:
-    def ensure_collection(self) -> None:
-        raise NotImplementedError
-
     def upsert_chunks(
         self,
         *,
@@ -62,9 +58,6 @@ class InMemoryVectorStoreService(VectorStoreService):
     def __init__(self) -> None:
         self._points: dict[str, tuple[list[float], str, dict[str, Any]]] = {}
         self._lock = RLock()
-
-    def ensure_collection(self) -> None:
-        return None
 
     def upsert_chunks(
         self,
@@ -117,118 +110,3 @@ def _cosine(left: Iterable[float], right: Iterable[float]) -> float:
     if not left_norm or not right_norm:
         return 0.0
     return dot / (left_norm * right_norm)
-
-
-class QdrantVectorStoreService(VectorStoreService):
-    def __init__(self, url: str, api_key: str, collection_name: str) -> None:
-        from qdrant_client import QdrantClient
-
-        self.client = QdrantClient(url=url, api_key=api_key)
-        self.collection_name = collection_name
-        self._collection_ready = False
-
-    def ensure_collection(self) -> None:
-        if self._collection_ready:
-            return
-        from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
-
-        collections = self.client.get_collections().collections
-        if not any(item.name == self.collection_name for item in collections):
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=VectorParams(size=settings.vector_size, distance=Distance.COSINE),
-            )
-        for field_name in ("session_id", "analyzer_type", "file_id", "user_id"):
-            try:
-                self.client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name=field_name,
-                    field_schema=PayloadSchemaType.KEYWORD,
-                )
-            except Exception as exc:
-                message = str(exc).lower()
-                if "already exists" not in message and "conflict" not in message:
-                    raise
-        self._collection_ready = True
-
-    def upsert_chunks(
-        self,
-        *,
-        texts: list[str],
-        vectors: list[list[float]],
-        metadatas: list[dict[str, Any]],
-    ) -> None:
-        from qdrant_client.models import PointStruct
-
-        self.ensure_collection()
-        for start in range(0, len(texts), settings.vector_upsert_batch_size):
-            batch_texts = texts[start : start + settings.vector_upsert_batch_size]
-            batch_vectors = vectors[start : start + settings.vector_upsert_batch_size]
-            batch_metadata = metadatas[start : start + settings.vector_upsert_batch_size]
-            points = [
-                PointStruct(
-                    id=metadata["point_id"],
-                    vector=vector,
-                    payload={**metadata, "text": text},
-                )
-                for text, vector, metadata in zip(batch_texts, batch_vectors, batch_metadata)
-            ]
-            self.client.upsert(collection_name=self.collection_name, points=points)
-
-    def search(
-        self,
-        *,
-        query_vector: list[float],
-        filters: dict[str, Any],
-        limit: int,
-        score_threshold: float | None = None,
-    ) -> list[SearchResult]:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-        qfilter = Filter(
-            must=[
-                FieldCondition(key=key, match=MatchValue(value=value))
-                for key, value in filters.items()
-            ]
-        )
-        if hasattr(self.client, "search"):
-            hits = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                query_filter=qfilter,
-                limit=limit,
-                score_threshold=score_threshold,
-            )
-        else:
-            response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_vector,
-                query_filter=qfilter,
-                limit=limit,
-                score_threshold=score_threshold,
-                with_payload=True,
-            )
-            hits = response.points
-        return [
-            SearchResult(
-                text=hit.payload.get("text", ""),
-                score=hit.score,
-                metadata={k: v for k, v in hit.payload.items() if k != "text"},
-            )
-            for hit in hits
-        ]
-
-    def delete_file(self, filters: dict[str, Any]) -> None:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-        qfilter = Filter(
-            must=[
-                FieldCondition(key=key, match=MatchValue(value=value))
-                for key, value in filters.items()
-            ]
-        )
-        self.client.delete(collection_name=self.collection_name, points_selector=qfilter)
-
-    def ping(self) -> bool:
-        self.client.get_collection(self.collection_name)
-        return True

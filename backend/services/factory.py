@@ -2,34 +2,16 @@ from config import settings
 from services.embedding_service import EmbeddingService
 from services.ingestion_service import IngestionService
 from services.job_service import JobService
-from services.metadata_service import InMemoryMetadataService, SupabaseMetadataService
 from services.rag_service import RagService
-from services.storage_service import LocalStorageService, SupabaseStorageService
-from services.vector_store_service import InMemoryVectorStoreService, QdrantVectorStoreService
+from services.sqlite_store import LocalDatabase, SQLiteMetadataService, SQLiteVectorStoreService
+from services.storage_service import LocalStorageService
 
 
 def build_services():
-    if settings.supabase_url and settings.supabase_service_role_key:
-        metadata = SupabaseMetadataService(
-            settings.supabase_url, settings.supabase_service_role_key
-        )
-        storage = SupabaseStorageService(
-            settings.supabase_url,
-            settings.supabase_service_role_key,
-            settings.supabase_storage_bucket or "documents",
-        )
-    else:
-        metadata = InMemoryMetadataService()
-        storage = LocalStorageService(settings.local_storage_dir)
-
-    if settings.qdrant_url and settings.qdrant_api_key:
-        vector_store = QdrantVectorStoreService(
-            settings.qdrant_url,
-            settings.qdrant_api_key,
-            settings.qdrant_collection_name,
-        )
-    else:
-        vector_store = InMemoryVectorStoreService()
+    storage = LocalStorageService(settings.local_storage_dir)
+    database = LocalDatabase(storage.root / "docrag.sqlite3")
+    metadata = SQLiteMetadataService(database)
+    vector_store = SQLiteVectorStoreService(database, settings.embedding_model)
 
     embeddings = EmbeddingService()
     ingestion = IngestionService(

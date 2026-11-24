@@ -66,9 +66,6 @@ class IngestionService:
                 strict_filter(record.session_id, record.analyzer_type, record.id, record.user_id)
             )
 
-            embed_started = time.perf_counter()
-            # Keep embedding and Qdrant calls coarse enough that network and
-            # per-call overhead do not dominate ingestion time.
             batch_size = settings.vector_upsert_batch_size
 
             total_embedding_seconds = 0.0

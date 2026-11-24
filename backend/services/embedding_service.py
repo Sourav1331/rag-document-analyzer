@@ -1,4 +1,6 @@
 from functools import lru_cache
+import os
+from pathlib import Path
 import logging
 import time
 
@@ -14,7 +16,8 @@ def get_embedding_model():
     logger.info("embedding_model_load_started model=%s", settings.embedding_model)
     from fastembed import TextEmbedding
 
-    model = TextEmbedding(model_name=settings.embedding_model)
+    cache = os.getenv("FASTEMBED_CACHE_PATH") or str(Path(settings.local_storage_dir) / ".models")
+    model = TextEmbedding(model_name=settings.embedding_model, cache_dir=cache)
     logger.info(
         "embedding_model_load_completed model=%s duration_seconds=%.3f",
         settings.embedding_model,

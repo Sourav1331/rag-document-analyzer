@@ -7,14 +7,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 os.environ["ONNXRUNTIME_DISABLE_DEVICE_DISCOVERY"] = "1"
-load_dotenv()
 
 from config import settings  # noqa: E402
 from services.document_service import validate_filename, validate_size  # noqa: E402
@@ -31,21 +29,10 @@ UPLOAD_EXTENSIONS = {
     "csv": {".csv"},
     "pdf": {".pdf"},
     "excel": {".xlsx", ".xls"},
-    "text": {".txt"},
+    "text": {".txt", ".docx", ".doc"},
     "docx": {".docx", ".doc"},
 }
 _recovery_in_progress: set[str] = set()
-
-
-async def initialize_vector_store(vector_store) -> None:
-    """Initialize remote vector storage without blocking Uvicorn port binding."""
-    try:
-        await asyncio.to_thread(vector_store.ensure_collection)
-        logger.info("Vector collection initialized successfully.")
-    except Exception:
-        # The service should still start so Render can health-check it. The
-        # dependency state is exposed through /ready and retried on ingestion.
-        logger.exception("Vector collection setup failed during background initialization.")
 
 
 async def process_file_in_background(svc: dict, file_id: str) -> None:
@@ -75,13 +62,8 @@ async def process_file_in_background(svc: dict, file_id: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    services = build_services()
-    app.state.services = services
-    vector_init_task = asyncio.create_task(
-        initialize_vector_store(services["vector_store"])
-    )
+    app.state.services = build_services()
     yield
-    vector_init_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -368,7 +350,7 @@ def readiness(request: Request):
             checks[name] = False
             status_code = 503
     checks["groq_configured"] = bool(settings.groq_api_key)
-    if not checks["groq_configured"]:
+    if not all(checks.values()):
         status_code = 503
     return JSONResponse(status_code=status_code, content={"status": "ready" if status_code == 200 else "not_ready", "checks": checks})
 

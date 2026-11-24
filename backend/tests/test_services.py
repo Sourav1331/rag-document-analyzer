@@ -7,6 +7,7 @@ from langchain_core.documents import Document
 
 from services.document_service import split_documents, stable_chunk_id, validate_filename
 from services.errors import FileTooLargeError, NotFoundError, NotReadyError, ProcessingError
+from services.factory import build_services
 from services.ingestion_service import IngestionService
 from services.metadata_service import InMemoryMetadataService
 from services.models import FileRecord
@@ -54,6 +55,49 @@ def test_deterministic_ids_are_stable():
     second = stable_point_id("s", "pdf", "f", 3)
     assert first == second
     assert stable_chunk_id("s", "pdf", "f", 3) == first
+
+
+def test_local_services_reopen_documents_and_rank_only_the_selected_file(monkeypatch, tmp_path):
+    monkeypatch.setattr("services.factory.settings", SimpleNamespace(
+        local_storage_dir=str(tmp_path), embedding_model="test", redis_url=None,
+    ))
+    svc = build_services()
+    for file_id in ("first", "second"):
+        item = record(id=file_id, user_id="owner", storage_path=f"{file_id}.txt")
+        svc["metadata"].create_file(item)
+        svc["storage"].upload(item.storage_path, b"source document")
+        scope = strict_filter(item.session_id, item.analyzer_type, item.id, item.user_id)
+        svc["vector_store"].upsert_chunks(
+            texts=["unrelated", file_id], vectors=[[0, 2], [3, 0]],
+            metadatas=[{**scope, "point_id": file_id + suffix} for suffix in ("-1", "-2")],
+        )
+        svc["metadata"].update_file(item.id, status="ready", chunk_count=2)
+
+    reopened = build_services()
+    item = reopened["metadata"].get_file("first")
+    assert item.status == "ready" and item.chunk_count == 2
+    assert reopened["storage"].download(item.storage_path) == b"source document"
+    store = reopened["vector_store"]
+    scope = strict_filter(item.session_id, item.analyzer_type, item.id, item.user_id)
+
+    def search(filters):
+        return [hit.text for hit in store.search(
+            query_vector=[2, 0], filters=filters, limit=1, score_threshold=0.5,
+        )]
+
+    assert search(scope) == ["first"]
+    for field in ("session_id", "analyzer_type", "user_id", "file_id"):
+        assert search({**scope, field: "unknown"}) == []
+    store.delete_file({**scope, "user_id": "other"})
+    assert search(scope) == ["first"]
+    reopened["metadata"].update_file(item.id, status="deleting")
+    store.delete_file(scope)
+    reopened["metadata"].update_file(item.id, status="deleted")
+    # An ingestion job finishing after removal cannot restore the chunks or the file.
+    store.upsert_chunks(texts=["late"], vectors=[[2, 0]], metadatas=[{**scope, "point_id": "late"}])
+    assert reopened["metadata"].update_file(item.id, status="ready").status == "deleted"
+    assert search(scope) == []
+    assert search({**scope, "file_id": "second"}) == ["second"]
 
 
 def test_split_documents_adds_isolation_metadata(monkeypatch):

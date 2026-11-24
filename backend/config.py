@@ -1,5 +1,12 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")
 
 
 def _int_env(name: str, default: int) -> int:
@@ -26,29 +33,15 @@ class Settings:
     # Safe defaults for Render's 512 MB free instance. Increase these only
     # after moving to a larger instance with more memory.
     embedding_batch_size: int = _int_env("EMBEDDING_BATCH_SIZE", 8)
-    vector_size: int = _int_env("VECTOR_SIZE", 384)
-
-    qdrant_url: str | None = os.getenv("QDRANT_URL")
-    qdrant_api_key: str | None = os.getenv("QDRANT_API_KEY")
-    qdrant_collection_name: str = os.getenv(
-        # Keep vectors from the previous embedding model isolated.
-        "QDRANT_COLLECTION_NAME", "docrag_chunks_v2"
-    )
     vector_upsert_batch_size: int = _int_env("VECTOR_UPSERT_BATCH_SIZE", 64)
     retrieval_k: int = _int_env("RETRIEVAL_K", 4)
     retrieval_score_threshold: float | None = _float_env(
         "RETRIEVAL_SCORE_THRESHOLD", None
     )
 
-    supabase_url: str | None = os.getenv("SUPABASE_URL")
-    supabase_service_role_key: str | None = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    supabase_storage_bucket: str | None = os.getenv(
-        "SUPABASE_STORAGE_BUCKET", "documents"
-    )
-
     redis_url: str | None = os.getenv("REDIS_URL")
     ingestion_mode: str = os.getenv("INGESTION_MODE", "sync").lower()
-    local_storage_dir: str = os.getenv("LOCAL_STORAGE_DIR", "uploads")
+    local_storage_dir: str = str(BACKEND_DIR / os.getenv("LOCAL_STORAGE_DIR", "uploads"))
 
     allowed_origins: list[str] = None  # type: ignore[assignment]
     max_file_size_mb: int = _int_env("MAX_FILE_SIZE_MB", 10)
@@ -73,15 +66,6 @@ class Settings:
     @property
     def max_file_size_bytes(self) -> int:
         return self.max_file_size_mb * 1024 * 1024
-
-    @property
-    def external_services_configured(self) -> bool:
-        return bool(
-            self.qdrant_url
-            and self.qdrant_api_key
-            and self.supabase_url
-            and self.supabase_service_role_key
-        )
 
 
 settings = Settings()
