@@ -1,3 +1,5 @@
+import asyncio
+import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +13,7 @@ from services.factory import build_services
 from services.ingestion_service import IngestionService
 from services.metadata_service import InMemoryMetadataService
 from services.models import FileRecord
-from services.rag_service import RagService
+from services.rag_service import MISSING_DETAIL, RagService
 from services.storage_service import LocalStorageService
 from services.vector_store_service import InMemoryVectorStoreService, stable_point_id, strict_filter
 
@@ -203,6 +205,25 @@ def test_ask_uses_only_query_embedding_for_ready_file():
     assert results[0].text == "answer context"
     assert embeddings.query_calls == 1
     assert embeddings.document_calls == 0
+
+
+def test_empty_retrieval_reports_missing_evidence_in_both_answer_modes(monkeypatch):
+    metadata = InMemoryMetadataService()
+    metadata.create_file(record(status="ready"))
+    rag = RagService(metadata=metadata, vector_store=InMemoryVectorStoreService(), embeddings=FakeEmbeddings())
+    monkeypatch.setattr("services.rag_service.get_chat_llm", lambda: pytest.fail("No passages to send to the LLM"))
+    request = dict(session_id="session-1", analyzer_type="pdf", file_id="file-1",
+                   question="What should I pay attention to first?", history=[])
+
+    async def collect_events():
+        return [json.loads(event.removeprefix("data: ")) async for event in rag.stream_answer(**request)]
+
+    assert rag.answer(**request) == MISSING_DETAIL
+    assert asyncio.run(collect_events()) == [
+        {"type": "sources", "sources": []},
+        {"type": "token", "text": MISSING_DETAIL},
+        {"type": "done"},
+    ]
 
 
 def test_ingestion_updates_failed_status_and_removes_temp_download(monkeypatch, tmp_path):
