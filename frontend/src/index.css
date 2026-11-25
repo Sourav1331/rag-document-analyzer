@@ -191,6 +191,13 @@ h1 em,h2 em { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400;
 .message-text h1,.message-text h2,.message-text h3 { font-size: 1.05rem; font-weight: 700; }
 .message-text a { color: var(--blue); text-decoration: underline; }
 .message-text pre { overflow-x: auto; background: var(--soft); padding: .6rem; }
+.answer-table { max-width: 100%; overflow-x: auto; margin-block: .65rem; border: 1px solid var(--line); border-radius: 8px; }
+.answer-table:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.answer-table table { width: 100%; border-collapse: collapse; font-size: .94rem; line-height: 1.5; }
+.answer-table th,.answer-table td { min-width: 7rem; padding: .55rem .75rem; text-align: start; vertical-align: top; }
+.answer-table th { background: var(--soft); font-weight: 650; }
+.answer-table td { border-top: 1px solid var(--line); }
+.answer-table :is(th,td) + :is(th,td) { border-inline-start: 1px solid var(--line); }
 .message-foot { display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin-top: .5rem; }
 .citations,.copy { font-size: .84rem; }
 .citations summary,.copy { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; }

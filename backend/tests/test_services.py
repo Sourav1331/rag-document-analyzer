@@ -12,7 +12,8 @@ from services.errors import FileTooLargeError, NotFoundError, NotReadyError, Pro
 from services.factory import build_services
 from services.ingestion_service import IngestionService
 from services.metadata_service import InMemoryMetadataService
-from services.models import FileRecord
+from services.models import FileRecord, SearchResult
+from services.pdf_inventory import is_pdf_inventory
 from services.rag_service import MISSING_DETAIL, RagService
 from services.storage_service import LocalStorageService
 from services.vector_store_service import InMemoryVectorStoreService, stable_point_id, strict_filter
@@ -224,6 +225,58 @@ def test_empty_retrieval_reports_missing_evidence_in_both_answer_modes(monkeypat
         {"type": "token", "text": MISSING_DETAIL},
         {"type": "done"},
     ]
+
+
+@pytest.mark.parametrize(("question", "response"), [
+    ("List any dates, names, and figures mentioned.", ""),
+    ("List dates, names, and any figure captions or references.", "invalid JSON"),
+    ("List dates, names, and any figure captions or references.", json.dumps({
+        "dates": ["June 2025", "June 2024", "31,000+"],
+        "names": ["Mira Shah", "Max Bell"],
+        "figures": ["31,000+ teams", "Figure 1: Placements"],
+    })),
+])
+def test_pdf_inventory_only_reports_sourced_mentions_in_both_answer_modes(monkeypatch, question, response):
+    rag = RagService(metadata=InMemoryMetadataService(), vector_store=InMemoryVectorStoreService(), embeddings=FakeEmbeddings())
+    hit = SearchResult("Name: Mira Shah\nQualified in June\u202f2025.\nTop 800 out of 31,000+ teams.",
+                       0.9, {"filename": "sample.pdf", "page_number": 2, "chunk_index": 3})
+    monkeypatch.setattr(rag, "retrieve", lambda **kwargs: [hit])
+    model = SimpleNamespace(invoke=lambda _: SimpleNamespace(content=response))
+    monkeypatch.setattr("services.rag_service.get_chat_llm", lambda: model)
+    request = dict(session_id="s", analyzer_type="pdf", file_id="f", question=question,
+                   history=[{"role": "assistant", "content": "Max Bell graduated in June 2024."}])
+    answer = rag.answer(**request)
+    assert "Mira Shah (page 2, passage 4)" in answer
+    assert answer.count("June 2025 (page 2, passage 4)") == 1
+    assert "No figure captions or references were identified in the retrieved text." in answer
+    assert all(value not in answer for value in ("2024", "Max Bell", "31,000", "800", "Placements"))
+
+    async def collect_events():
+        return [json.loads(event.removeprefix("data: ")) async for event in rag.stream_answer(**request)]
+
+    sources, token, done = asyncio.run(collect_events())
+    assert sources["type"] == "sources" and sources["sources"][0]["excerpt"] == hit.text
+    assert token == {"type": "token", "text": answer}
+    assert done == {"type": "done"}
+
+
+def test_pdf_inventory_recovers_from_empty_generation_and_cites_actual_figure(monkeypatch):
+    rag = RagService(metadata=None, vector_store=None, embeddings=None)
+    results = [
+        SearchResult("See Figure 2 for details.\nFigure 2: Team placements", 0.9,
+                     {"source_type": "pdf", "page_number": 3, "chunk_index": 4}),
+        SearchResult("Mira Shah led the project.", 0.8, {"source_type": "pdf", "page_number": 1, "chunk_index": 0}),
+    ]
+    question = "List any dates, names, and figures mentioned."
+    responses = iter([[{"type": "reasoning", "text": "internal"}], '{"names":["Mira Shah"],"dates":[]}'])
+    monkeypatch.setattr(rag, "retrieve", lambda **kwargs: results)
+    monkeypatch.setattr("services.rag_service.get_chat_llm", lambda: SimpleNamespace(invoke=lambda _: next(responses)))
+    answer = rag.answer(session_id="s", analyzer_type="pdf", file_id="f", question=question, history=[])
+    assert "Mira Shah (page 1, passage 1)" in answer
+    assert "Figure 2: Team placements (page 3, passage 5)" in answer
+    assert "No dates could be identified" in answer
+    assert not is_pdf_inventory("List dates, names, and sales figures.", results)
+    assert not is_pdf_inventory(question, [SearchResult("", 1, {"source_type": "csv"})])
 
 
 def test_ingestion_updates_failed_status_and_removes_temp_download(monkeypatch, tmp_path):

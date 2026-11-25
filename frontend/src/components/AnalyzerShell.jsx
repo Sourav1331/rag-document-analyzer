@@ -16,7 +16,7 @@ const SUGGESTIONS = {
   pdf: [
     'Summarize this PDF in 5 bullet points.',
     'What are the key findings or conclusions?',
-    'List any dates, names, and figures mentioned.',
+    'List dates, names, and any figure captions or references.',
     'What should I pay attention to first?'
   ],
   excel: [

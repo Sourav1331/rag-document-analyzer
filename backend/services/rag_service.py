@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -9,6 +10,7 @@ from services.errors import NotFoundError, NotReadyError
 from services.llm_service import get_chat_llm
 from services.metadata_service import MetadataService
 from services.models import SearchResult
+from services.pdf_inventory import INVENTORY_INSTRUCTIONS, format_pdf_inventory, is_pdf_inventory
 from services.vector_store_service import VectorStoreService, strict_filter
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,7 @@ def _content_text(content) -> str:
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict):
+            elif isinstance(block, dict) and block.get("type") in (None, "text", "output_text"):
                 value = block.get("text") or block.get("content")
                 if isinstance(value, str):
                     parts.append(value)
@@ -49,7 +51,28 @@ skills, or a target job. Give a page or passage reference when pointing to a det
 For factual questions, report only facts supported by the passages. If a requested
 fact is missing, say you couldn't find it in the retrieved passages. For mixed
 questions, answer the supported parts and identify the missing detail. Preserve
-relevant names, numbers, dates, and exact URLs. Write in plain text."""
+relevant names, numbers, dates, and exact URLs. Ground each extracted fact in a
+cited passage. A year next to a degree does not establish a graduation date.
+For PDF questions about visual figures, cite only captions or explicit references
+in the extracted text. Report quantities as figures only when the reader means
+numeric figures. The passages alone cannot establish whether uncaptioned images
+exist or whether a list covers the entire PDF. Write in plain text."""
+
+
+def _pdf_inventory_answer(results: list[SearchResult]) -> str:
+    prompt = [("system", INVENTORY_INSTRUCTIONS),
+              ("human", "\n\n".join(result.text for result in results))]
+    text = ""
+    try:
+        model = get_chat_llm()
+        for _ in range(2):
+            response = model.invoke(prompt)
+            text = _content_text(getattr(response, "content", response)).strip()
+            if text:
+                break
+    except Exception:
+        logger.exception("pdf_inventory_generation_failed")
+    return format_pdf_inventory(results, text)
 
 
 class RagService:
@@ -135,6 +158,8 @@ class RagService:
         )
         if not results:
             return MISSING_DETAIL
+        if is_pdf_inventory(question, results):
+            return _pdf_inventory_answer(results)
         prompt = self.build_prompt(question, history, results)
         response = get_chat_llm().invoke(prompt)
         text = _content_text(getattr(response, "content", response)).strip()
@@ -171,6 +196,11 @@ class RagService:
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
             if not results:
                 yield f"data: {json.dumps({'type': 'token', 'text': MISSING_DETAIL})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            if is_pdf_inventory(question, results):
+                answer = await asyncio.to_thread(_pdf_inventory_answer, results)
+                yield f"data: {json.dumps({'type': 'token', 'text': answer})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
             prompt = self.build_prompt(question, history, results)
